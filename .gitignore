@@ -1,0 +1,11 @@
+build
+pico-examples
+pico-sdk
+.vscode
+
+# Dependance tierce (aic_pico), recuperee separement (voir build.sh) :
+# non versionnee ici pour ne creer aucun lien vers un depot upstream.
+modules/
+
+# Artefact de build (regenere par build.sh)
+mai_pico.uf2
