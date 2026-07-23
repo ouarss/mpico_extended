@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mai Pico Monitor</title>
+<!-- Inline icon, so a file:// page does not log an "unsafe attempt to load
+     URL" for a missing /favicon.ico. -->
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="assets/css/base.css">
+<link rel="stylesheet" href="assets/css/maipico.css">
+</head>
+<body>
+
+<nav class="sidebar">
+  <div class="brand">Mai Pico<span>Touch monitor</span></div>
+
+  <ul class="nav">
+    <li><button type="button" data-section="info" class="active">Information</button></li>
+    <li><button type="button" data-section="live">Live</button></li>
+    <li><button type="button" data-section="tuning">Tuning</button></li>
+    <li><button type="button" data-section="mapping">Mapping</button></li>
+    <li><button type="button" data-section="board">Board</button></li>
+    <li><button type="button" data-section="console">Console</button></li>
+  </ul>
+
+  <div class="sidebar-status">
+    <span id="link" class="badge badge-off">disconnected</span>
+    <div class="stat"><b id="rate">0</b> frames/s</div>
+    <p class="sidebar-note">Display rate, capped at ~25 Hz. The touch pipeline
+      runs faster; this only limits how often the page redraws.</p>
+    <button type="button" id="connect" class="primary wide" hidden>Connect</button>
+    <button type="button" id="disconnect" class="wide" hidden>Disconnect</button>
+  </div>
+</nav>
+
+<div class="content">
+
+  <!-- Appears only while something is unsaved: a button always present stops
+       being noticed. -->
+  <div id="save-banner" class="save-banner" hidden>
+    <span id="save-message">Unsaved changes - lost when the board is unplugged.</span>
+    <div class="actions">
+      <button type="button" data-cmd="save" class="primary">Save to flash</button>
+    </div>
+  </div>
+
+  <!-- ==================== INFORMATION ==================== -->
+  <section class="section active" data-section="info">
+    <header class="section-head">
+      <h1>Information</h1>
+      <p class="hint">How the board decides a zone is pressed, and how to set it
+        so nothing triggers on its own. Pick a topic on the left.</p>
+    </header>
+
+    <div class="info-layout">
+      <nav class="info-nav">
+        <button type="button" data-topic="hardware" class="active">Hardware</button>
+        <button type="button" data-topic="detection">How detection works</button>
+        <button type="button" data-topic="compare">Old vs new</button>
+        <button type="button" data-topic="guide">Avoiding false triggers</button>
+        <button type="button" data-topic="connection">Connection</button>
+        <button type="button" data-topic="protocol">Protocol</button>
+      </nav>
+
+      <div class="info-content">
+        <article data-topic="hardware" class="active">
+          <h2>Hardware</h2>
+          <p>Touch sensing is done by three <strong>MPR121</strong> capacitive
+            controllers on the I2C bus, at addresses <code>0x5A</code>,
+            <code>0x5B</code> and <code>0x5C</code>. Each carries twelve
+            electrodes, so there are <strong>36 electrodes</strong> in total.</p>
+          <p>The playfield has <strong>34 zones</strong> (A1&ndash;A8,
+            B1&ndash;B8, C1&ndash;C2, D1&ndash;D8, E1&ndash;E8). Each zone is fed
+            by one electrode; the electrode&rarr;zone assignment is the mapping
+            (two electrodes are left unconnected, marked <code>XX</code>).</p>
+          <table class="info-table">
+            <thead><tr><th>Sensor</th><th>I2C address</th><th>Electrodes</th></tr></thead>
+            <tbody>
+              <tr><td>0</td><td><code>0x5A</code></td><td>0&ndash;11</td></tr>
+              <tr><td>1</td><td><code>0x5B</code></td><td>12&ndash;23</td></tr>
+              <tr><td>2</td><td><code>0x5C</code></td><td>24&ndash;35</td></tr>
+            </tbody>
+          </table>
+          <p>Electrode <em>e</em> lives on sensor <code>floor(e/12)</code>,
+            channel <code>e mod 12</code>.</p>
+        </article>
+
+        <article data-topic="detection">
+          <h2>How detection works</h2>
+          <p>Every electrode has a slowly-tracked <strong>baseline</strong>: its
+            resting capacitance. A touch lowers the reading, so the firmware
+            works with the <strong>delta</strong>:</p>
+          <pre class="info-diagram">delta = baseline - filtered     (never below 0)
+
+        threshold ON  ______________________
+                     |                       |
+   delta rises ----->|   ON while delta >= threshold
+                     |_______________________
+        threshold OFF (= threshold x (1 - hyst%))
+                     released once delta falls back under here</pre>
+          <ol class="info-steps">
+            <li><strong>Averaging</strong> &mdash; the last few frames are
+              averaged (<em>avg</em>) to shed the couple of counts of noise a
+              single frame carries.</li>
+            <li><strong>Threshold</strong> &mdash; a zone turns <em>on</em> when
+              its delta reaches the zone's threshold. Higher threshold means
+              less sensitive.</li>
+            <li><strong>Release margin (hyst)</strong> &mdash; once on, a zone
+              stays on until the delta falls under
+              <code>threshold x (1 - hyst/100)</code>. This stops a finger
+              resting at the limit from flickering on and off.</li>
+            <li><strong>Debounce</strong> &mdash; a change must hold for
+              <em>debounce on</em> / <em>debounce off</em> frames before it is
+              accepted, filtering out one-frame glitches.</li>
+            <li><strong>Latency</strong> &mdash; an optional extra hold, to line
+              the input up with a slower device.</li>
+          </ol>
+          <h3>Baseline: hardware vs software</h3>
+          <p><strong>Hardware</strong> baseline uses the MPR121's own tracking.
+            <strong>Software</strong> baseline lets the firmware track it, at a
+            configurable rate. Tracking freezes while a zone is held, so a
+            sustained press can never be absorbed. <em>Set idle level</em>
+            (<code>rebase</code>) retakes the reference at once.</p>
+          <h3>Timing</h3>
+          <p>The control loop runs at <strong>1 kHz</strong>. The three sensors
+            are read one per frame (round-robin), so each refreshes about every
+            3 ms and the decision adds only a few milliseconds &mdash; below what
+            is perceptible. The real limit is the MPR121's own sampling rate, not
+            how fast the firmware reads it.</p>
+        </article>
+
+        <article data-topic="compare">
+          <h2>Old vs new detection</h2>
+          <p>The stock Mai Pico firmware and this firmware decide a touch in
+            fundamentally different places.</p>
+
+          <h3>Native (stock) detection</h3>
+          <p>Each MPR121 decides on its own, in hardware; the firmware only reads
+            the chip's touched / not-touched bitmap. Sensitivity was a coarse
+            <em>offset</em> (about -30 to +30) around fixed base thresholds (touch
+            22, release 15), nudged one step at a time with <code>sense +</code> /
+            <code>sense -</code>. The chip tracks its own baseline and freezes it
+            while an electrode is held.</p>
+
+          <h3>New (software) detection</h3>
+          <p>The firmware reads the MPR121 <strong>filtered value</strong> and
+            <strong>baseline</strong> per electrode and decides itself:
+            <code>delta = baseline - filtered</code> against an
+            <strong>absolute per-zone threshold</strong>, with a release margin
+            (hysteresis), a debounce count, optional averaging and latency, and a
+            choice of hardware or software baseline. The MPR121 is still used,
+            tuned as a clean front-end (gain, filter).</p>
+
+          <table class="info-table">
+            <thead><tr><th></th><th>Native (stock)</th><th>New (software)</th></tr></thead>
+            <tbody>
+              <tr><td>Decision</td><td>MPR121 hardware</td><td>firmware, per zone</td></tr>
+              <tr><td>Threshold</td><td>offset around a fixed base</td><td>absolute, 1-1000, per zone</td></tr>
+              <tr><td>Hysteresis</td><td>fixed (chip)</td><td>adjustable %</td></tr>
+              <tr><td>Debounce</td><td>chip debounce</td><td>on / off frame counts</td></tr>
+              <tr><td>Visibility</td><td>touched flag only</td><td>live filtered / baseline / delta</td></tr>
+              <tr><td>I2C load</td><td>tiny (one bitmap)</td><td>all electrodes (round-robin)</td></tr>
+              <tr><td>Latency</td><td>lowest (chip decides)</td><td>a few ms (loop still 1 kHz)</td></tr>
+            </tbody>
+          </table>
+
+          <h3>Native &mdash; pros and cons</h3>
+          <ul class="info-steps">
+            <li><strong>+</strong> Simplest, lowest latency: the chip reports a press directly.</li>
+            <li><strong>+</strong> Negligible I2C traffic; uses the MPR121's optimised detection.</li>
+            <li><strong>-</strong> Coarse: an offset around a fixed base, no absolute per-zone value.</li>
+            <li><strong>-</strong> No fine hysteresis or per-zone debounce, and no view of the noise.</li>
+            <li><strong>-</strong> Hard to remove occasional spurious triggers precisely.</li>
+          </ul>
+
+          <h3>New &mdash; pros and cons</h3>
+          <ul class="info-steps">
+            <li><strong>+</strong> Absolute per-zone threshold, hysteresis and debounce &mdash; set each zone just above its own noise.</li>
+            <li><strong>+</strong> Live delta / baseline per zone (and the trace), so tuning is visible, not guesswork.</li>
+            <li><strong>+</strong> Directly attacks the "too sensitive / false triggers" problem; the front-end (gain, filter) stays tunable.</li>
+            <li><strong>-</strong> More moving parts and a little more code.</li>
+            <li><strong>-</strong> Reads every electrode and decides in firmware &mdash; a few ms more latency and more bus traffic than a bare hardware flag.</li>
+          </ul>
+
+          <h3>Performance &mdash; is the new path fast enough?</h3>
+          <p>Yes, comfortably. The loop stays at <strong>1 kHz</strong>; the
+            sensors are read round-robin (each about 333 Hz) and the software
+            decision adds only a few milliseconds &mdash; imperceptible in play.
+            Reading faster gains nothing: the MPR121's own sample rate is the real
+            limit.</p>
+          <p>Pushing latency lower would mean flooding the shared I2C bus (it also
+            carries the NFC reader) or shortening the chip's filters, which
+            <em>raises</em> noise &mdash; the opposite of the goal. The one clean
+            lever, if ever needed, is DMA I2C reads; today that would be premature
+            optimisation.</p>
+          <p><strong>In short:</strong> the native path is the leanest and
+            lowest-latency but blunt; the new path trades a little latency and I2C
+            traffic for fine, visible, per-zone control &mdash; the right call when
+            the goal is to stop unwanted triggers without dulling real touches.</p>
+        </article>
+
+        <article data-topic="guide">
+          <h2>Avoiding false triggers</h2>
+          <p>A zone that triggers untouched almost always has its threshold set
+            below its own resting noise. The fix is to read the noise, then set
+            the threshold just above it.</p>
+          <ol class="info-steps">
+            <li>Open <strong>Live</strong> and leave the glass untouched. Watch
+              the delta of each zone: that is the resting noise floor.</li>
+            <li>Note the highest resting delta a zone reaches on its own.</li>
+            <li>In <strong>Tuning</strong>, set that zone's threshold a little
+              above that figure &mdash; enough margin that noise never reaches
+              it, low enough that a real touch clears it easily.</li>
+            <li>If a zone still scintillates at the limit, raise
+              <strong>hyst</strong> (release margin) and/or
+              <strong>debounce</strong>.</li>
+            <li>If the resting delta has drifted away from zero, press
+              <strong>Set idle level</strong> to retake the baseline untouched.</li>
+            <li>When it behaves, press <strong>Save to flash</strong> &mdash;
+              nothing survives a power cycle until you do.</li>
+          </ol>
+        </article>
+
+        <article data-topic="connection">
+          <h2>Connection</h2>
+          <p>This page talks to the board over <strong>WebSerial</strong>, so it
+            needs Chrome or Edge. Press <em>Connect</em> and pick the board in
+            the browser prompt.</p>
+          <p>The Mai Pico exposes several USB interfaces. Choose the one labelled
+            <strong>Command Line</strong> (the <code>.2</code> interface) &mdash;
+            not the game input interface. Its USB id is
+            <code>VID 0ca3 / PID 0021</code>.</p>
+          <p>Once connected, the command prompt is <code>mai_pico&gt;</code>. The
+            page sends <code>feed on</code> automatically, which starts the live
+            frames and makes the board republish its configuration. Use
+            <em>Disconnect</em> to hand the port back cleanly before opening it
+            in another program.</p>
+        </article>
+
+        <article data-topic="protocol">
+          <h2>Protocol</h2>
+          <p>The board emits two kinds of machine line, plus plain console text.</p>
+          <h3>Live frame &mdash; <code>F</code></h3>
+          <p>One per frame, 74 space-separated tokens:</p>
+          <pre class="info-diagram">F  &lt;36 filtered&gt;  &lt;36 delta&gt;  &lt;16-hex zone bitmap&gt;</pre>
+          <p>36 <em>filtered</em> readings then 36 <em>delta</em> values, one per
+            electrode (0&ndash;35). The final token is a 64-bit bitmap of the
+            active zones, as 16 hex characters.</p>
+          <h3>Configuration &mdash; <code>C</code></h3>
+          <p>Emitted on <code>feed on</code> and after every setting change:
+            <code>C {json}</code>, carrying the per-zone thresholds, the mapping,
+            and every processing parameter (hyst, avg, latency, filter, gain,
+            debounce, baseline mode, rate) plus the <code>saved</code> flag.</p>
+          <h3>Commands</h3>
+          <table class="cmd-table">
+            <tbody>
+              <tr class="cmd-group"><th colspan="2">Threshold</th></tr>
+              <tr><td><code>thr &lt;ZONE&gt; &lt;val&gt;</code></td><td>One zone's threshold (1&ndash;1000; higher = less sensitive)</td></tr>
+              <tr><td><code>thr all &lt;val&gt;</code></td><td>Every zone at once</td></tr>
+
+              <tr class="cmd-group"><th colspan="2">Processing</th></tr>
+              <tr><td><code>hyst &lt;0&ndash;90&gt;</code></td><td>Release margin, % of threshold</td></tr>
+              <tr><td><code>avg &lt;1&ndash;16&gt;</code></td><td>Moving-average window (1 = off, lowest latency)</td></tr>
+              <tr><td><code>latency &lt;0&ndash;9&gt;</code></td><td>Output delay, frames</td></tr>
+              <tr><td><code>debounce &lt;on&gt; [off]</code></td><td>Consecutive samples before ON / OFF</td></tr>
+              <tr><td><code>filter &lt;ffi&gt; &lt;sfi&gt; &lt;esi&gt;</code></td><td>MPR121 hardware pre-filter</td></tr>
+              <tr><td><code>gain &lt;cdc&gt; &lt;cdt&gt;</code></td><td>MPR121 charge current / time</td></tr>
+              <tr><td><code>baseline &lt;hw|soft&gt; [rate]</code></td><td>Baseline tracking mode</td></tr>
+              <tr><td><code>rebase</code></td><td>Re-seed the idle baseline now</td></tr>
+              <tr><td><code>preset default | flat &lt;val&gt;</code></td><td>Bulk threshold preset</td></tr>
+
+              <tr class="cmd-group"><th colspan="2">Mapping</th></tr>
+              <tr><td><code>touch &lt;sensor&gt; &lt;channel&gt; &lt;ZONE&gt;</code></td><td>Assign an electrode to a zone</td></tr>
+
+              <tr class="cmd-group"><th colspan="2">Storage</th></tr>
+              <tr><td><code>save</code></td><td>Write the config to flash</td></tr>
+              <tr><td><code>factory</code></td><td>Reset everything to defaults</td></tr>
+
+              <tr class="cmd-group"><th colspan="2">Feed &amp; diagnostics</th></tr>
+              <tr><td><code>feed &lt;on|off&gt;</code></td><td>Machine stream for this monitor</td></tr>
+              <tr><td><code>display sense</code></td><td>Print the full sensitivity config</td></tr>
+              <tr><td><code>raw</code></td><td>Per-zone filtered / baseline / delta / threshold</td></tr>
+              <tr><td><code>stat</code></td><td>Per-zone touch counters</td></tr>
+              <tr><td><code>fps</code></td><td>Core-loop rates</td></tr>
+            </tbody>
+          </table>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== LIVE ==================== -->
+  <section class="section" data-section="live">
+    <header class="section-head">
+      <h1>Live</h1>
+      <div class="section-actions">
+        <div class="btn-group view-toggle">
+          <button type="button" id="view-zone" class="seg on">By zone</button>
+          <button type="button" id="view-electrode" class="seg">By electrode</button>
+        </div>
+        <button type="button" id="rebase">Set idle level</button>
+      </div>
+      <p class="hint">Delta is what the firmware compares to each threshold. Pick
+        a zone or electrode to trace it over time. Set idle level retakes the
+        baseline from the current reading &mdash; do it untouched.</p>
+    </header>
+
+    <div class="needs-config"><span>Connect the board to see live readings.</span><button type="button" class="connect-inline primary">Connect</button></div>
+
+    <div class="readout">
+      <span class="readout-label">Active now</span>
+      <b id="active">none</b>
+    </div>
+
+    <div class="split">
+      <div class="panel">
+        <h2>Playfield</h2>
+        <p class="hint">Zones the firmware reports as active are highlighted.</p>
+        <svg id="live-disc" class="disc disc-large" viewBox="0 0 420 420" aria-label="Game zones"></svg>
+      </div>
+
+      <div class="panel">
+        <h2>Trace</h2>
+        <p class="hint" id="spark-label">Pick a card below to trace its delta.</p>
+        <canvas id="spark" class="spark" width="600" height="180"></canvas>
+        <div class="spark-legend">
+          <span class="spark-key spark-on">threshold ON</span>
+          <span class="spark-key spark-off">threshold OFF</span>
+          <span class="spark-key spark-delta">delta</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Trace &mdash; all zones</h2>
+      <p class="hint">Every zone's delta at once, one colour per zone. A line
+        drifting up while nothing is touched is a zone picking up noise.</p>
+      <canvas id="spark-all" class="spark" width="600" height="220"></canvas>
+      <div id="spark-all-legend" class="spark-all-legend"></div>
+    </div>
+
+    <div class="panel" id="zone-view">
+      <h2>Zones</h2>
+      <p class="hint">Filtered / baseline / delta per zone. The marker on each
+        bar is the zone's threshold; the bar turns red once the delta crosses
+        it.</p>
+      <div id="zone-cards" class="sensor-grid"></div>
+    </div>
+
+    <div class="panel" id="electrode-view" hidden>
+      <h2>Electrodes</h2>
+      <p class="hint">All 36 electrodes, grouped by sensor. Each shows the zone
+        it powers (or XX when unconnected).</p>
+      <div id="electrode-cards"></div>
+    </div>
+  </section>
+
+  <!-- ==================== TUNING ==================== -->
+  <section class="section" data-section="tuning">
+    <header class="section-head">
+      <h1>Tuning</h1>
+      <p class="hint">Values in use on the board. Editing one applies it
+        immediately; nothing reaches flash until you save.</p>
+    </header>
+    <div class="needs-config"><span>Connect the board to load and edit its configuration.</span><button type="button" class="connect-inline primary">Connect</button></div>
+
+    <div class="panel">
+      <h2>Signal processing</h2>
+      <p class="hint">How the raw readings become a press. These apply to every
+        zone; per-zone thresholds are set below.</p>
+      <div id="processing"></div>
+    </div>
+
+    <div class="split map-split">
+      <div class="panel">
+        <h2>Pick a zone</h2>
+        <p class="hint">Each zone fills as its delta approaches its own
+          threshold, and turns red once it triggers.</p>
+        <svg id="thr-disc" class="disc disc-large" viewBox="0 0 420 420"
+             aria-label="Game zones, clickable"></svg>
+      </div>
+
+      <div class="panel">
+        <h2>Thresholds by zone <button type="button" class="opt-info" data-help="threshold" aria-label="About thresholds">?</button></h2>
+        <form id="threshold-all" class="console-form">
+          <label class="global-thr">All zones
+            <input type="range" id="threshold-all-value" min="1" max="1000" value="35">
+            <output id="threshold-all-out">35</output>
+          </label>
+          <button type="submit">Apply to all</button>
+        </form>
+        <table class="zone-table">
+          <thead>
+            <tr><th>Zone</th><th>Threshold</th><th>Delta</th><th></th></tr>
+          </thead>
+          <tbody id="threshold-rows"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== MAPPING ==================== -->
+  <section class="section" data-section="mapping">
+    <header class="section-head">
+      <h1>Mapping</h1>
+      <p class="hint">Which electrode feeds each zone. Assign by touch, or set
+        the electrode number by hand.</p>
+    </header>
+    <div class="needs-config"><span>Connect the board to load and edit its configuration.</span><button type="button" class="connect-inline primary">Connect</button></div>
+
+    <div class="split map-split">
+      <div class="panel">
+        <h2>Pick a zone</h2>
+        <p class="hint">Click a zone, then either type its electrode or let the
+          board find it: press <em>Start listening for touch</em>, then press and
+          hold that zone firmly on the glass until it locks in.</p>
+        <svg id="map-disc" class="disc disc-large" viewBox="0 0 420 420"
+             aria-label="Game zones, clickable"></svg>
+      </div>
+
+      <div class="panel">
+        <h2>Assign zones</h2>
+        <p class="hint">The electrode number is 0&ndash;35 (sensor
+          <code>floor(e/12)</code>, channel <code>e mod 12</code>). Calibrate by
+          touch walks every zone in turn.</p>
+        <div class="actions calibrate-actions">
+          <button type="button" id="calibrate" class="primary">Calibrate all zones</button>
+        </div>
+
+        <div id="calibrate-status" class="calibrate-status" hidden>
+          <p id="calibrate-zone">-</p>
+          <div id="calibrate-hold" class="hold-bar"><span class="hold-fill"></span></div>
+          <span id="calibrate-progress" class="dialog-progress"></span>
+          <button type="button" id="calibrate-skip">Skip</button>
+          <button type="button" id="calibrate-stop">Stop</button>
+        </div>
+
+        <table class="zone-table">
+          <thead>
+            <tr><th>Zone</th><th>Electrode</th><th>Sensor:Ch</th><th>Delta</th><th></th></tr>
+          </thead>
+          <tbody id="mapping-rows"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== BOARD ==================== -->
+  <section class="section" data-section="board">
+    <header class="section-head">
+      <h1>Board</h1>
+      <p class="hint">LED counts and brightness, the USB HID mode, and the NFC /
+        AIME reader. Editing one applies it on the board immediately; nothing
+        reaches flash until you save.</p>
+    </header>
+    <div class="needs-config"><span>Connect the board to load and edit its configuration.</span><button type="button" class="connect-inline primary">Connect</button></div>
+
+    <div class="panel">
+      <h2>LEDs &amp; brightness</h2>
+      <p class="hint">Global brightness, how many LEDs each unit carries, and the
+        order the eight ring buttons light in.</p>
+      <div id="board-leds"></div>
+    </div>
+
+    <div class="panel">
+      <h2>HID mode <button type="button" class="opt-info" data-help="hid" aria-label="About the HID mode">?</button></h2>
+      <p class="hint">How the board presents itself to the host over USB.</p>
+      <div id="board-hid"></div>
+    </div>
+
+    <div class="panel">
+      <h2>AIME / NFC <button type="button" class="opt-info" data-help="aime" aria-label="About the AIME reader">?</button></h2>
+      <p class="hint">The card-reader protocol, and whether a virtual card is
+        exposed when no physical reader is present.</p>
+      <div id="board-aime"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Buttons <button type="button" class="opt-info" data-help="tweak" aria-label="About the button tweaks">?</button></h2>
+      <p class="hint">Electrical polarity of the button inputs. Change only if the
+        buttons read inverted.</p>
+      <div id="board-tweak"></div>
+    </div>
+  </section>
+
+  <!-- ==================== CONSOLE ==================== -->
+  <section class="section" data-section="console">
+    <header class="section-head">
+      <h1>Console</h1>
+      <p class="hint">Direct line to the firmware. Everything the other tabs do
+        is a command; this is for diagnostics and anything not worth a button.
+        Output is capped at 200 lines.</p>
+    </header>
+    <div class="panel">
+      <pre id="console"></pre>
+
+      <div class="cmd-shortcuts">
+        <div class="cmd-row">
+          <span class="cmd-row-label">Show</span>
+          <button type="button" data-cmd="?" title="List every command.">help</button>
+          <button type="button" data-cmd="display" title="Print the whole configuration.">all config</button>
+          <button type="button" data-cmd="display sense" title="Sensitivity configuration.">sense</button>
+          <button type="button" data-cmd="display rgb" title="LED counts and levels.">rgb</button>
+          <button type="button" data-cmd="display hid" title="HID mode (IO4 / keyboard).">hid</button>
+          <button type="button" data-cmd="display gpio" title="Button GPIO assignments.">gpio</button>
+          <button type="button" data-cmd="display touch" title="Electrode to zone map.">touch map</button>
+          <button type="button" data-cmd="display aime" title="NFC / AIME settings.">aime</button>
+          <button type="button" data-cmd="display tweak" title="Miscellaneous tweaks.">tweak</button>
+          <button type="button" data-cmd="whoami" title="Identify each COM port.">whoami</button>
+        </div>
+        <div class="cmd-row">
+          <span class="cmd-row-label">Diagnostics</span>
+          <button type="button" data-cmd="raw" title="Filtered / baseline / delta / threshold per zone.">raw</button>
+          <button type="button" data-cmd="stat" title="Per-zone touch counters.">stat</button>
+          <button type="button" data-cmd="stat reset" title="Clear the touch counters.">stat reset</button>
+          <button type="button" data-cmd="fps" title="Core-loop rates.">fps</button>
+        </div>
+        <div class="cmd-row">
+          <span class="cmd-row-label">Actions</span>
+          <button type="button" data-cmd="rebase" title="Retake the idle baseline from the current reading.">rebase</button>
+          <button type="button" data-cmd="save" class="primary" title="Write the current configuration to flash.">save</button>
+          <button type="button" data-cmd="factory"
+              data-confirm="Restore factory values and overwrite the saved copy? The current configuration is lost.">factory</button>
+          <button type="button" data-cmd="update"
+              data-confirm="Reboot into bootloader (BOOTSEL) to flash firmware? The board will disconnect and appear as an RPI-RP2 drive.">update</button>
+        </div>
+      </div>
+
+      <form id="console-form" class="console-form">
+        <input type="text" id="command" placeholder="command, e.g. thr C1 40"
+               autocomplete="off" spellcheck="false">
+        <button type="submit">Send</button>
+        <button type="button" id="console-clear">Clear</button>
+      </form>
+    </div>
+  </section>
+
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
+<!-- Per-zone threshold, with a slider that drives the board as you drag. -->
+<dialog id="thr-dialog" class="zone-dialog">
+  <header>
+    <h3 id="thr-dialog-title">-</h3>
+    <span id="thr-dialog-reading" class="dialog-progress"></span>
+  </header>
+  <p class="dialog-status">Drag while touching the zone: the trigger point moves
+    under your finger.</p>
+  <div class="map-controls">
+    <label>Threshold</label>
+    <div id="thr-dialog-field"></div>
+  </div>
+  <input type="range" id="thr-dialog-slider" class="thr-slider" min="1" max="1000" value="35">
+  <div class="dialog-actions">
+    <button type="button" id="thr-dialog-save" class="primary">Save to flash</button>
+  </div>
+  <div class="dialog-close">
+    <button type="button" id="thr-dialog-close">Close</button>
+  </div>
+</dialog>
+
+<!-- Mapping: which electrode feeds the selected zone. -->
+<dialog id="zone-dialog" class="zone-dialog">
+  <header>
+    <h3 id="zone-dialog-title">-</h3>
+  </header>
+  <p id="zone-dialog-status" class="dialog-status"></p>
+  <div id="zone-hold" class="hold-bar" hidden><span class="hold-fill"></span></div>
+  <div class="dialog-actions">
+    <button type="button" id="zone-listen" class="primary">Start listening for touch</button>
+  </div>
+  <details class="manual">
+    <summary>Set the electrode by hand</summary>
+    <div id="zone-manual" class="map-controls"></div>
+  </details>
+  <div class="dialog-close">
+    <button type="button" id="zone-close">Close</button>
+  </div>
+</dialog>
+
+<!-- Per-option explanation, opened by the "?" buttons in Tuning. -->
+<dialog id="opt-dialog" class="opt-dialog">
+  <form method="dialog">
+    <h3 id="opt-title"></h3>
+    <div id="opt-body" class="opt-body"></div>
+    <menu class="opt-actions"><button value="close">Close</button></menu>
+  </form>
+</dialog>
+
+<script src="assets/js/zones-geometry.js"></script>
+<script src="assets/js/transport.js"></script>
+<script src="assets/js/monitor.js"></script>
+</body>
+</html>

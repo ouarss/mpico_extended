@@ -81,14 +81,28 @@ static void feed_publish_config()
     for (int i = 0; i < 36; i++) {
         printf(i ? ",%u" : "%u", mai_cfg->alt.touch[i]);
     }
+    printf("],\"rgbMap\":[");
+    for (int i = 0; i < 8; i++) {
+        printf(i ? ",%u" : "%u", mai_cfg->alt.rgb_button[i]);
+    }
     printf("],\"hyst\":%u,\"filter\":%u,\"avg\":%u,\"latency\":%u,"
            "\"baselineMode\":%u,\"rate\":%u,\"gainCdc\":%u,\"gainCdt\":%u,"
-           "\"debounceOn\":%u,\"debounceOff\":%u,\"saved\":%s}\n",
+           "\"debounceOn\":%u,\"debounceOff\":%u,"
+           "\"level\":%u,\"rgbButton\":%u,\"rgbCab\":%u,\"rgbBanner\":%u,"
+           "\"hidIo4\":%u,\"hidNkro\":%u,\"aimeMode\":%u,\"aimeVirtual\":%u,"
+           "\"tweakMain\":%u,\"tweakAux\":%u,"
+           "\"saved\":%s}\n",
            mai_cfg->sense.hysteresis, mai_cfg->sense.filter, mai_cfg->sense.avg,
            mai_cfg->sense.latency, mai_cfg->sense.baseline_mode,
            mai_cfg->sense.baseline_rate, mai_cfg->sense.gain_cdc,
            mai_cfg->sense.gain_cdt, mai_cfg->sense.debounce_on,
-           mai_cfg->sense.debounce_off, save_pending() ? "false" : "true");
+           mai_cfg->sense.debounce_off,
+           mai_cfg->color.level, mai_cfg->rgb.per_button, mai_cfg->rgb.per_cab,
+           mai_cfg->rgb.per_banner, mai_cfg->hid.io4, mai_cfg->hid.nkro,
+           mai_cfg->aime.mode, mai_cfg->aime.virtual_aic,
+           mai_cfg->tweak.main_button_active_high,
+           mai_cfg->tweak.aux_button_active_high,
+           save_pending() ? "false" : "true");
 }
 
 // Common tail after any sensitivity change: persist, notify the monitor, echo.
@@ -225,6 +239,7 @@ static void handle_rgb(int argc, char *argv[])
     mai_cfg->rgb.per_banner = per_banner;
 
     config_changed();
+    if (feeding) feed_publish_config();
     disp_rgb();
 }
 
@@ -244,6 +259,7 @@ static void handle_level(int argc, char *argv[])
 
     mai_cfg->color.level = level;
     config_changed();
+    if (feeding) feed_publish_config();
     disp_rgb();
 }
 
@@ -304,6 +320,7 @@ static void handle_hid(int argc, char *argv[])
             break;
     }
     config_changed();
+    if (feeding) feed_publish_config();
     disp_hid();
 }
 
@@ -683,6 +700,7 @@ static void handle_rgbmap(int argc, char *argv[])
         return;
     }
     config_changed();
+    if (feeding) feed_publish_config();
     disp_rgb();
 }
 
@@ -792,6 +810,7 @@ static void handle_aime(int argc, char *argv[])
     }
 
     if (ok) {
+        if (feeding) feed_publish_config();
         disp_aime();
     } else {
         printf("%s", usage);
@@ -831,6 +850,7 @@ static void handle_tweak(int argc, char *argv[])
     }
 
     config_changed();
+    if (feeding) feed_publish_config();
     disp_tweak();
 }
 
@@ -862,9 +882,17 @@ void commands_feed_poll()
     if (!feeding) {
         return;
     }
-    static uint32_t last = 0;
     uint32_t now = board_millis();
-    if (now - last < 40) { // ~25 Hz
+
+    // Keep the monitor's config view in sync, whatever changed it (2 Hz).
+    static uint32_t last_cfg = 0;
+    if (now - last_cfg >= 500) {
+        last_cfg = now;
+        feed_publish_config();
+    }
+
+    static uint32_t last = 0;
+    if (now - last < 40) { // ~25 Hz data frames
         return;
     }
     last = now;

@@ -41,15 +41,15 @@ void cli_register(const char *cmd, cmd_handler_t handler, const char *help)
 int cli_match_prefix(const char *str[], int num, const char *prefix)
 {
     int match = -1;
-    bool found = false;
 
     for (int i = 0; (i < num) && str[i]; i++) {
+        // An exact match always wins, even when the word is also a prefix of a
+        // longer command (e.g. "rgb" is a prefix of "rgbmap").
+        if (strcasecmp(str[i], prefix) == 0) {
+            return i;
+        }
         if (strncasecmp(str[i], prefix, strlen(prefix)) == 0) {
-            if (found) {
-                return -2;
-            }
-            found = true;
-            match = i;
+            match = (match == -1) ? i : -2;
         }
     }
 

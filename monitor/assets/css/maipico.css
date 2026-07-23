@@ -1,0 +1,388 @@
+/* Delta over base.css: the pieces specific to the Mai Pico monitor -
+   electrode/zone cards with a threshold marker, the trace canvas, and the
+   signal-processing controls. Everything else is inherited from base.css. */
+
+/* --- View toggle -------------------------------------------------------- */
+
+.view-toggle .seg { padding: 5px 14px; }
+
+/* --- Live cards --------------------------------------------------------- */
+
+.sensor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 8px;
+}
+
+/* One sensor's electrodes, under a small heading. */
+.sensor-group { margin-bottom: 16px; }
+.sensor-group:last-child { margin-bottom: 0; }
+.sensor-group h3 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.cell {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--sidebar);
+  cursor: pointer;
+  transition: border-color .08s, background .08s;
+}
+.cell:hover { border-color: var(--accent); }
+.cell.selected { border-color: var(--accent); background: rgba(78, 161, 255, .1); }
+.cell.touched { border-color: var(--hot); background: rgba(255, 92, 92, .12); }
+
+.cell-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 6px;
+}
+.cell-name { font-weight: 600; font-size: 13px; }
+.cell-sub { color: var(--muted); font-size: 11px; }
+
+.cell-vals {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  margin-bottom: 7px;
+  font-variant-numeric: tabular-nums;
+}
+.cell-vals > div { display: flex; flex-direction: column; }
+.cell-vals span { color: var(--muted); font-size: 10px; }
+.cell-vals b { color: var(--text); font: 12px/1.3 var(--mono); font-weight: 600; }
+.cell.touched .cell-delta b { color: var(--hot); }
+
+/* Bar with a threshold marker: the fill is the delta, the marker sits at the
+   threshold. Both are placed on the same 0..BAR_MAX scale by the script, which
+   sets --bar (fill width) and --thr-pos (marker offset). */
+.cell-bar {
+  position: relative;
+  height: 6px;
+  background: var(--well);
+  border-radius: 3px;
+}
+.cell-bar .fill {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: var(--bar, 0);
+  max-width: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width .06s linear;
+}
+.cell.touched .cell-bar .fill { background: var(--hot); }
+.cell-bar .mark {
+  position: absolute;
+  top: -2px; bottom: -2px;
+  left: var(--thr-pos, 50%);
+  width: 2px;
+  margin-left: -1px;
+  background: var(--warn);
+  border-radius: 1px;
+}
+
+/* --- Trace canvas ------------------------------------------------------- */
+
+.spark {
+  width: 100%;
+  height: 180px;
+  display: block;
+  background: var(--well);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.spark-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.spark-key { display: inline-flex; align-items: center; gap: 6px; }
+.spark-key::before {
+  content: "";
+  width: 12px;
+  height: 2px;
+  border-radius: 1px;
+  background: currentColor;
+}
+.spark-on { color: var(--hot); }
+.spark-off { color: var(--warn); }
+.spark-delta { color: var(--accent); }
+
+/* Global trace: taller canvas + a compact colour legend (one entry per zone). */
+#spark-all { height: 220px; }
+.spark-all-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 8px;
+  font-size: 10px;
+  color: var(--muted);
+}
+.spark-all-legend span { display: inline-flex; align-items: center; gap: 4px; }
+.spark-all-legend i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+
+/* --- Signal-processing controls ----------------------------------------- */
+
+#processing {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(232px, 1fr));
+  gap: 12px;
+}
+.proc {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--well);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.proc-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.proc-head > label { color: var(--text); font-size: 13px; font-weight: 600; }
+.proc > input[type="number"] { width: 96px; }
+.proc small { color: var(--muted); font-size: 11px; line-height: 1.45; }
+.proc-detail { color: var(--accent) !important; font: 11px/1.4 var(--mono); }
+
+/* Presets is a reset-like action, set it apart with a warning tint. */
+.proc.proc-reset {
+  background: rgba(255, 176, 0, 0.07);
+  border-color: rgba(255, 176, 0, 0.35);
+}
+
+/* Give the Tuning and Board number inputs the same look as the Mapping inputs
+   (base.css styles those by class; these tabs are not in that list). Widths
+   stay as set by the more specific rules above/below. */
+[data-section="tuning"] input[type="number"],
+[data-section="board"] input[type="number"] {
+  background: var(--well);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 6px 9px;
+  color: var(--text);
+  font: 13px/1.4 var(--mono);
+}
+[data-section="tuning"] input[type="number"]:focus,
+[data-section="board"] input[type="number"]:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* The playfield is a square circle. Cap the disc at a comfortable size and, on
+   wide screens, shrink its column to fit it (rather than the disc floating in a
+   wide panel). Below the base stacking breakpoint the panels stack full-width. */
+.disc-large { max-width: 520px; }
+/* Selected zone on the live Playfield: an accent outline, while a touch keeps
+   its red fill (the id selector wins over the base .pad.selected fill). */
+#live-disc .pad.selected { stroke: var(--accent); stroke-width: 2.5; }
+#live-disc .pad.touched { fill: var(--hot); }
+@media (min-width: 1101px) {
+  [data-section="live"] .split { grid-template-columns: minmax(0, 540px) minmax(0, 1fr); }
+}
+
+/* Connect affordance inside the "connect the board" notices. */
+.needs-config { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.needs-config .connect-inline { flex: none; }
+
+/* "?" help affordance on each option and panel header */
+.opt-info {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  font: 600 11px/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+.opt-info:hover { color: var(--accent); border-color: var(--accent); }
+h2 .opt-info { margin-left: 6px; vertical-align: middle; }
+
+/* Option help dialog */
+.opt-dialog {
+  width: min(460px, 92vw);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  padding: 0;
+}
+.opt-dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
+.opt-dialog form { padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; }
+.opt-dialog h3 { margin: 0; font-size: 15px; color: var(--text); }
+.opt-body { color: var(--muted); font-size: 13px; line-height: 1.55; display: flex; flex-direction: column; gap: 8px; }
+.opt-body p { margin: 0; }
+.opt-body b { color: var(--text); }
+/* Recommended-default callout at the bottom of a help popup. */
+.opt-default {
+  margin: 6px 0 0;
+  padding: 7px 11px;
+  border-left: 3px solid var(--accent);
+  border-radius: 4px;
+  background: rgba(78, 161, 255, 0.12);
+  color: var(--muted);
+  font-size: 12px;
+}
+.opt-default b { color: var(--accent); }
+.opt-actions { margin: 4px 0 0; padding: 0; display: flex; justify-content: flex-end; }
+.opt-actions button {
+  padding: 6px 16px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--well);
+  color: var(--text);
+  cursor: pointer;
+}
+.opt-actions button:hover { border-color: var(--accent); }
+
+/* Console command shortcuts, grouped by purpose */
+.cmd-shortcuts { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
+.cmd-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.cmd-row-label {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  width: 88px;
+  flex: none;
+}
+
+/* A row of small labelled fields, for the packed settings (filter, gain,
+   debounce). */
+.proc-fields { display: flex; flex-wrap: wrap; gap: 10px; }
+.proc-field { display: flex; flex-direction: column; gap: 3px; }
+.proc-field span { color: var(--muted); font-size: 11px; }
+.proc-field input { width: 64px; }
+
+.proc-btns { display: flex; flex-wrap: wrap; gap: 6px; }
+.proc-btns .seg.on { border-color: var(--ok); color: var(--ok); }
+.proc-flat { display: flex; gap: 6px; align-items: center; }
+.proc-flat input { width: 70px; }
+
+/* --- Hold-to-lock progress (Mapping / calibration) ---------------------- */
+
+/* Fills as a single firmware trigger is held steadily; empties the moment the
+   hold is lost. --hold (0%..100%) is set from script each frame. In the zone
+   dialog it is a full-width bar; in the inline calibration row it takes a fixed
+   slice so the guided message stays readable beside it. */
+.hold-bar {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--well);
+  border: 1px solid var(--line);
+  overflow: hidden;
+  margin: 0 0 16px;
+}
+.hold-bar .hold-fill {
+  display: block;
+  height: 100%;
+  width: var(--hold, 0%);
+  background: var(--ok);
+  border-radius: 4px;
+  transition: width .08s linear;
+}
+.calibrate-status .hold-bar {
+  flex: none;
+  width: 120px;
+  margin: 0;
+}
+
+/* --- Board (LEDs / HID / AIME) ------------------------------------------ */
+
+/* Same card language as the processing grid; the LED-order card spans it. */
+.board-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(232px, 1fr));
+  gap: 12px;
+}
+/* Wide enough for the 8 LED chips on one row, but not the full grid width. */
+.board-grid .board-wide { grid-column: span 2; }
+
+/* Button LED order: draggable pastilles laid out along the LED chain (position
+   0 on the left to 7 on the right). Dragging one reorders which button a chain
+   position lights. */
+.led-order {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.led-chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 46px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--sidebar);
+  color: var(--text);
+  font: 13px/1 var(--mono);
+  cursor: grab;
+  user-select: none;
+}
+/* Console log: colour the typed command, put a clear separator before each
+   command block, and dim the bare prompt lines the firmware echoes. */
+.log-cmd { color: var(--ok); font-weight: 600; }
+.log-entry {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.log-entry:first-child { margin-top: 0; padding-top: 0; border-top: none; }
+.log-bare { opacity: 0.4; }
+
+.led-chip:hover { border-color: var(--accent); }
+/* While dragging, the moved chip becomes a clear "drop here" placeholder that
+   the live reorder slides to the target slot. */
+.led-chip.dragging {
+  border-style: dashed;
+  border-color: var(--accent);
+  background: rgba(78, 161, 255, 0.15);
+  color: var(--accent);
+  cursor: grabbing;
+}
+.led-chip.drop-ready { cursor: grab; }
+.led-order:has(.dragging) { outline: 1px dashed var(--line); outline-offset: 6px; border-radius: 8px; }
+
+/* Labelled selector rows (AIME): a name on the left, its buttons on the right. */
+.board-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.board-row:last-child { margin-bottom: 0; }
+.board-row-label {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  min-width: 110px;
+}
+
+/* Commands reference table (Information tab) */
+.cmd-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.cmd-table td { padding: 3px 12px 3px 0; vertical-align: top; color: var(--text); line-height: 1.5; }
+.cmd-table td:first-child { white-space: nowrap; }
+.cmd-table td code { font-family: var(--mono); }
+.cmd-table .cmd-group th {
+  text-align: left;
+  padding: 14px 0 5px;
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--line);
+}
+.cmd-table .cmd-group:first-child th { padding-top: 2px; }
