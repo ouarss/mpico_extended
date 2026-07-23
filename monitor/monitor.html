@@ -21,6 +21,8 @@
     <li><button type="button" data-section="tuning">Tuning</button></li>
     <li><button type="button" data-section="mapping">Mapping</button></li>
     <li><button type="button" data-section="board">Board</button></li>
+    <li><button type="button" data-section="profiles">Profiles</button></li>
+    <li><button type="button" data-section="logs">Logs</button></li>
     <li><button type="button" data-section="console">Console</button></li>
   </ul>
 
@@ -484,6 +486,98 @@
     </div>
   </section>
 
+  <!-- ==================== PROFILES ==================== -->
+  <section class="section" data-section="profiles">
+    <header class="section-head">
+      <h1>Profiles</h1>
+      <p class="hint">Save the board's current configuration under a name, then
+        restore it later, inspect it, or move it between browsers as a JSON file.
+        Applying a profile sends every setting to the board but never saves to
+        flash on its own &mdash; use Save to flash once you are happy.</p>
+    </header>
+    <div class="needs-config"><span>Connect the board to save its configuration or apply a profile.</span><button type="button" class="connect-inline primary">Connect</button></div>
+
+    <div class="panel">
+      <h2>Save current config</h2>
+      <p class="hint">Captures every setting currently on the board (thresholds,
+        mapping, processing and board options) under the name you give.</p>
+      <form id="profile-save-form" class="console-form">
+        <input type="text" id="profile-name" placeholder="Profile name, e.g. Cabinet A"
+               autocomplete="off" spellcheck="false">
+        <button type="submit" class="primary">Save current config</button>
+      </form>
+    </div>
+
+    <div class="panel">
+      <div class="profiles-head">
+        <h2>Saved profiles</h2>
+        <div class="actions">
+          <button type="button" id="profile-import" class="primary">Import JSON</button>
+          <input type="file" id="profile-import-input" accept="application/json" hidden>
+        </div>
+      </div>
+      <p class="hint">Stored in this browser. Apply sends the profile to the
+        board; nothing reaches flash until you Save to flash.</p>
+
+      <div id="profile-apply" class="profile-apply" hidden>
+        <div id="profile-apply-bar" class="hold-bar"><span class="hold-fill"></span></div>
+        <span id="profile-apply-progress" class="dialog-progress">Applying&hellip;</span>
+      </div>
+
+      <div id="profile-list" class="profile-list"></div>
+    </div>
+  </section>
+
+  <!-- ==================== LOGS ==================== -->
+  <section class="section" data-section="logs">
+    <header class="section-head">
+      <h1>Logs</h1>
+      <p class="hint">Live per-zone statistics and a recordable session, to
+        review how the panel behaves in production. Everything here stays in the
+        browser and nothing is written to the board.</p>
+    </header>
+    <div class="needs-config"><span>Connect the board to collect live statistics.</span><button type="button" class="connect-inline primary">Connect</button></div>
+
+    <div class="panel">
+      <div class="profiles-head">
+        <h2>Live stats by zone</h2>
+        <div class="actions">
+          <button type="button" id="log-reset">Reset stats</button>
+          <button type="button" id="log-stats-csv">Export CSV</button>
+          <button type="button" id="log-stats-json">Export JSON</button>
+        </div>
+      </div>
+      <p class="hint">Peak is the highest delta ever seen; noise ceiling is the
+        highest delta while the zone was <em>not</em> active (its standby noise
+        floor &mdash; the number to set a threshold against); triggers counts
+        firmware activations. A row turns red when its noise ceiling reaches the
+        threshold &mdash; that zone risks phantom presses.</p>
+      <table class="zone-table log-table">
+        <thead>
+          <tr><th>Zone</th><th>Threshold</th><th>Peak</th><th>Noise ceiling</th><th>Triggers</th></tr>
+        </thead>
+        <tbody id="log-rows"></tbody>
+      </table>
+    </div>
+
+    <div class="panel">
+      <h2>Session recording</h2>
+      <p class="hint">Records every frame (per-zone deltas and active state) so a
+        production run can be exported and analysed offline. Capped at 30000
+        samples (about 20 minutes at 25 Hz), then it stops on its own.</p>
+      <div class="log-record-bar">
+        <button type="button" id="log-record" class="primary">Record</button>
+        <span class="readout-label">State</span><b id="log-rec-state">stopped</b>
+        <span class="readout-label">Samples</span><b id="log-rec-count">0</b>
+        <span class="readout-label">Duration</span><b id="log-rec-duration">0.0 s</b>
+      </div>
+      <div class="actions">
+        <button type="button" id="log-session-csv">Export session CSV</button>
+        <button type="button" id="log-session-json">Export session JSON</button>
+      </div>
+    </div>
+  </section>
+
   <!-- ==================== CONSOLE ==================== -->
   <section class="section" data-section="console">
     <header class="section-head">
@@ -577,6 +671,18 @@
   </details>
   <div class="dialog-close">
     <button type="button" id="zone-close">Close</button>
+  </div>
+</dialog>
+
+<!-- Read-only detail of a saved profile, opened by its View button. -->
+<dialog id="profile-dialog" class="zone-dialog profile-dialog">
+  <header>
+    <h3 id="profile-dialog-title">-</h3>
+    <span id="profile-dialog-date" class="dialog-progress"></span>
+  </header>
+  <div id="profile-dialog-body" class="profile-view"></div>
+  <div class="dialog-close">
+    <button type="button" id="profile-dialog-close">Close</button>
   </div>
 </dialog>
 

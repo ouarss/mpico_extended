@@ -370,6 +370,98 @@ h2 .opt-info { margin-left: 6px; vertical-align: middle; }
   min-width: 110px;
 }
 
+/* --- Profiles ----------------------------------------------------------- */
+
+.profiles-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.profile-list { display: flex; flex-direction: column; gap: 8px; }
+.profile-empty { color: var(--muted); font-size: 12px; margin: 0; }
+
+.profile-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  background: var(--well);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.profile-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.profile-name { font-weight: 600; font-size: 14px; }
+.profile-date { color: var(--muted); font-size: 11px; }
+
+.profile-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.profile-actions button { padding: 5px 12px; font-size: 12px; }
+
+/* Apply progress: the warning language of the guided calibration, with a bar. */
+.profile-apply {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  background: rgba(255, 176, 0, .1);
+  border: 1px solid rgba(255, 176, 0, .4);
+  border-radius: 8px;
+}
+.profile-apply .hold-bar { flex: none; width: 160px; margin: 0; }
+.profile-apply .dialog-progress { color: var(--warn); font-weight: 600; }
+
+/* View dialog: wider than the zone dialog, and its body scrolls on its own. */
+.profile-dialog { width: min(560px, 94vw); }
+.profile-view {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-bottom: 4px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.profile-section h4 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.profile-thr-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+  gap: 6px;
+}
+.profile-thr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 4px;
+  background: var(--sidebar);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.profile-thr-zone { color: var(--muted); font-size: 10px; }
+.profile-thr b { font: 13px/1 var(--mono); color: var(--text); }
+
+.profile-params {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 16px;
+  margin: 0;
+}
+.profile-params dt { color: var(--muted); font-size: 12px; }
+.profile-params dd { margin: 0; font: 12px/1.4 var(--mono); color: var(--text); text-align: right; }
+
 /* Commands reference table (Information tab) */
 .cmd-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .cmd-table td { padding: 3px 12px 3px 0; vertical-align: top; color: var(--text); line-height: 1.5; }
@@ -386,3 +478,25 @@ h2 .opt-info { margin-left: 6px; vertical-align: middle; }
   border-bottom: 1px solid var(--line);
 }
 .cmd-table .cmd-group:first-child th { padding-top: 2px; }
+
+/* --- Logs --------------------------------------------------------------- */
+
+.log-table td { font-variant-numeric: tabular-nums; color: var(--text); }
+/* A zone whose standby noise reaches its threshold: at risk of phantom clicks. */
+.log-table tr.noisy td { color: var(--hot); }
+.log-table tr.noisy .zone-name { font-weight: 600; }
+
+.log-record-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-bottom: 14px;
+}
+.log-record-bar b {
+  font: 13px/1 var(--mono);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.log-record-bar .readout-label { margin-left: 6px; }
+#log-record.recording { border-color: var(--hot); color: var(--hot); }

@@ -128,6 +128,29 @@ const els = {
   optDialog: document.getElementById('opt-dialog'),
   optTitle: document.getElementById('opt-title'),
   optBody: document.getElementById('opt-body'),
+  profileSaveForm: document.getElementById('profile-save-form'),
+  profileName: document.getElementById('profile-name'),
+  profileImport: document.getElementById('profile-import'),
+  profileImportInput: document.getElementById('profile-import-input'),
+  profileList: document.getElementById('profile-list'),
+  profileApply: document.getElementById('profile-apply'),
+  profileApplyBar: document.getElementById('profile-apply-bar'),
+  profileApplyProgress: document.getElementById('profile-apply-progress'),
+  profileDialog: document.getElementById('profile-dialog'),
+  profileDialogTitle: document.getElementById('profile-dialog-title'),
+  profileDialogDate: document.getElementById('profile-dialog-date'),
+  profileDialogBody: document.getElementById('profile-dialog-body'),
+  profileDialogClose: document.getElementById('profile-dialog-close'),
+  logRows: document.getElementById('log-rows'),
+  logReset: document.getElementById('log-reset'),
+  logStatsCsv: document.getElementById('log-stats-csv'),
+  logStatsJson: document.getElementById('log-stats-json'),
+  logRecord: document.getElementById('log-record'),
+  logRecState: document.getElementById('log-rec-state'),
+  logRecCount: document.getElementById('log-rec-count'),
+  logRecDuration: document.getElementById('log-rec-duration'),
+  logSessionCsv: document.getElementById('log-session-csv'),
+  logSessionJson: document.getElementById('log-session-json'),
 };
 
 const needsConfig = document.querySelectorAll('.needs-config');
@@ -1178,6 +1201,347 @@ function refreshBoard(cfg) {
   setToggle(board.tweakAux, cfg.tweakAux === 1);
 }
 
+// --- Profiles --------------------------------------------------------------
+
+// Saved configurations live in localStorage as an array of
+// { name, savedAt (ISO), config } - config being a deep copy of the last C
+// line the firmware published. Everything here is browser-side; nothing is
+// written to flash until the user applies a profile and then saves.
+const PROFILE_STORE_KEY = 'maipico-profiles';
+
+// ~90 commands per apply. A short gap between them keeps the serial port from
+// being flooded while still finishing in under two seconds.
+const APPLY_DELAY_MS = 20;
+
+let applying = false;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const cloneConfig = (cfg) => (typeof structuredClone === 'function'
+  ? structuredClone(cfg)
+  : JSON.parse(JSON.stringify(cfg)));
+
+function loadProfiles() {
+  const raw = localStorage.getItem(PROFILE_STORE_KEY);
+  if (!raw) return [];
+  try {
+    const list = JSON.parse(raw);
+    return Array.isArray(list) ? list : [];
+  } catch (error) {
+    notify('Stored profiles were unreadable and have been ignored', 'warn');
+    return [];
+  }
+}
+
+function storeProfiles(list) {
+  localStorage.setItem(PROFILE_STORE_KEY, JSON.stringify(list));
+}
+
+// A value is a profile if it carries a config object with a thresholds array -
+// enough to tell a real profile from an unrelated JSON file on import.
+function isProfile(value) {
+  return Boolean(value) && typeof value === 'object'
+    && Boolean(value.config) && typeof value.config === 'object'
+    && Array.isArray(value.config.thr);
+}
+
+function makeButton(text, className, onClick) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  if (className) b.className = className;
+  b.textContent = text;
+  b.addEventListener('click', onClick);
+  return b;
+}
+
+function formatDate(iso) {
+  if (!iso) return '';
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleString();
+}
+
+// Keep a name usable as a filename, without leaning on any one profile name.
+function safeFileName(name) {
+  return name.replace(/[^a-z0-9_-]+/gi, '-').replace(/^-+|-+$/g, '') || 'profile';
+}
+
+function saveCurrentProfile(name) {
+  const trimmed = name.trim();
+  if (!trimmed) { notify('Enter a name for the profile', 'warn'); return; }
+  if (!config) { notify('Connect the board before saving a profile', 'warn'); return; }
+
+  const list = loadProfiles();
+  const existing = list.findIndex((p) => p.name === trimmed);
+  const profile = { name: trimmed, savedAt: new Date().toISOString(), config: cloneConfig(config) };
+
+  if (existing >= 0) {
+    if (!window.confirm(`A profile named "${trimmed}" already exists. Replace it?`)) return;
+    list[existing] = profile;
+  } else {
+    list.push(profile);
+  }
+  storeProfiles(list);
+  renderProfiles();
+  els.profileName.value = '';
+  notify(`Profile "${trimmed}" saved`);
+}
+
+function deleteProfile(name) {
+  if (!window.confirm(`Delete profile "${name}"? This cannot be undone.`)) return;
+  storeProfiles(loadProfiles().filter((p) => p.name !== name));
+  renderProfiles();
+  notify(`Profile "${name}" deleted`);
+}
+
+function exportProfile(profile) {
+  const blob = new Blob([JSON.stringify(profile, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `maipico-${safeFileName(profile.name)}.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+// Give an imported name a " (2)" suffix rather than overwrite a saved profile.
+function uniqueName(base, list) {
+  if (!list.some((p) => p.name === base)) return base;
+  let n = 2;
+  while (list.some((p) => p.name === `${base} (${n})`)) n += 1;
+  return `${base} (${n})`;
+}
+
+function importProfileFile(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    let parsed;
+    try {
+      parsed = JSON.parse(reader.result);
+    } catch (error) {
+      notify('That file is not valid JSON', 'warn');
+      return;
+    }
+    if (!isProfile(parsed)) {
+      notify('That file is not a Mai Pico profile', 'warn');
+      return;
+    }
+    const list = loadProfiles();
+    const name = uniqueName((parsed.name || 'Imported profile').trim() || 'Imported profile', list);
+    list.push({ name, savedAt: parsed.savedAt || new Date().toISOString(), config: parsed.config });
+    storeProfiles(list);
+    renderProfiles();
+    notify(`Profile "${name}" imported`);
+  };
+  reader.onerror = () => notify('Could not read that file', 'warn');
+  reader.readAsText(file);
+}
+
+// The exact CLI sequence that reproduces a profile on the board. Order follows
+// the config's own layout; baseline seeds the soft rate first, then drops back
+// to hardware when that was the saved mode.
+function buildApplyCommands(cfg) {
+  const cmds = [];
+
+  for (let z = 0; z < N_Z; z += 1) cmds.push(`thr ${zones[z]} ${cfg.thr[z]}`);
+
+  cmds.push(`hyst ${cfg.hyst}`);
+  cmds.push(`avg ${cfg.avg}`);
+  cmds.push(`latency ${cfg.latency}`);
+  cmds.push(`debounce ${cfg.debounceOn} ${cfg.debounceOff}`);
+
+  const filter = decodeFilter(cfg.filter);
+  cmds.push(`filter ${filter.ffi} ${filter.sfi} ${filter.esi}`);
+
+  cmds.push(`gain ${cfg.gainCdc} ${cfg.gainCdt}`);
+
+  cmds.push(`baseline soft ${cfg.rate}`);
+  if (cfg.baselineMode !== 1) cmds.push('baseline hw');
+
+  for (let e = 0; e < N_E; e += 1) {
+    const zone = cfg.map[e] === UNMAPPED ? 'XX' : zones[cfg.map[e]];
+    cmds.push(`touch ${Math.floor(e / PER_SENSOR)} ${e % PER_SENSOR} ${zone}`);
+  }
+
+  cmds.push(`level ${cfg.level}`);
+  cmds.push(`rgb ${cfg.rgbButton} ${cfg.rgbCab} ${cfg.rgbBanner}`);
+
+  if (cfg.rgbMap.every((v) => v === UNMAPPED)) {
+    cmds.push('rgbmap reset');
+  } else {
+    const resolved = cfg.rgbMap.map((v, i) => (v === UNMAPPED ? RGB_DEFAULT_ORDER[i] : v));
+    cmds.push(`rgbmap ${resolved.join(' ')}`);
+  }
+
+  const hidMode = cfg.hidIo4 === 1 ? 'io4'
+    : cfg.hidNkro === 1 ? 'key1'
+      : cfg.hidNkro === 2 ? 'key2' : 'off';
+  cmds.push(`hid ${hidMode}`);
+
+  cmds.push(`aime mode ${cfg.aimeMode}`);
+  cmds.push(`aime virtual ${cfg.aimeVirtual ? 'on' : 'off'}`);
+  cmds.push(`tweak main_button_active_high ${cfg.tweakMain ? 'on' : 'off'}`);
+  cmds.push(`tweak aux_button_active_high ${cfg.tweakAux ? 'on' : 'off'}`);
+
+  return cmds;
+}
+
+async function applyProfile(profile) {
+  if (!config) { notify('Connect the board before applying a profile', 'warn'); return; }
+  if (!isProfile(profile)) { notify('This profile is missing its configuration', 'warn'); return; }
+  if (applying) { notify('A profile is already being applied', 'warn'); return; }
+
+  const cmds = buildApplyCommands(profile.config);
+  applying = true;
+  els.profileApply.hidden = false;
+
+  for (let i = 0; i < cmds.length; i += 1) {
+    send(cmds[i]);
+    els.profileApplyProgress.textContent = `Applying ${profile.name}... ${i + 1}/${cmds.length}`;
+    setHoldProgress(els.profileApplyBar, (i + 1) / cmds.length);
+    // Deliberately serial: a small gap between commands paces the serial port.
+    await sleep(APPLY_DELAY_MS);
+  }
+
+  els.profileApply.hidden = true;
+  applying = false;
+  notify(`Profile "${profile.name}" applied - Save to flash to keep it`, 'warn');
+}
+
+function buildThresholdView(cfg) {
+  const section = document.createElement('div');
+  section.className = 'profile-section';
+  const heading = document.createElement('h4');
+  heading.textContent = 'Thresholds by zone';
+  section.appendChild(heading);
+
+  const grid = document.createElement('div');
+  grid.className = 'profile-thr-grid';
+  zones.forEach((zone, z) => {
+    const chip = document.createElement('div');
+    chip.className = 'profile-thr';
+    const name = document.createElement('span');
+    name.className = 'profile-thr-zone';
+    name.textContent = zone;
+    const value = document.createElement('b');
+    value.textContent = cfg.thr[z];
+    chip.append(name, value);
+    grid.appendChild(chip);
+  });
+  section.appendChild(grid);
+  return section;
+}
+
+function buildParamsView(cfg) {
+  const section = document.createElement('div');
+  section.className = 'profile-section';
+  const heading = document.createElement('h4');
+  heading.textContent = 'Processing & board';
+  section.appendChild(heading);
+
+  const filter = decodeFilter(cfg.filter);
+  const hidMode = cfg.hidIo4 === 1 ? 'IO4 (arcade)'
+    : cfg.hidNkro === 1 ? 'Keyboard 1'
+      : cfg.hidNkro === 2 ? 'Keyboard 2' : 'Off';
+  const mapped = cfg.map.filter((z) => z !== UNMAPPED).length;
+  const rgbOrder = cfg.rgbMap.every((v) => v === UNMAPPED)
+    ? 'default'
+    : cfg.rgbMap.map((v, i) => (v === UNMAPPED ? RGB_DEFAULT_ORDER[i] : v)).join(' ');
+
+  const rows = [
+    ['Release margin (hyst)', `${cfg.hyst}%`],
+    ['Averaging', cfg.avg > 1 ? `${cfg.avg} frames` : 'off'],
+    ['Latency', `${cfg.latency} frames`],
+    ['Debounce', `on ${cfg.debounceOn}, off ${cfg.debounceOff}`],
+    ['Filter (ffi/sfi/esi)', `${filter.ffi} / ${filter.sfi} / ${filter.esi}`],
+    ['Gain (cdc/cdt)', `${cfg.gainCdc} / ${cfg.gainCdt}`],
+    ['Baseline', cfg.baselineMode === 1 ? `software (rate ${cfg.rate})` : 'hardware'],
+    ['Mapped electrodes', `${mapped} of ${N_E}`],
+    ['Brightness (level)', String(cfg.level)],
+    ['LED counts (button/cab/banner)', `${cfg.rgbButton} / ${cfg.rgbCab} / ${cfg.rgbBanner}`],
+    ['Button LED order', rgbOrder],
+    ['HID mode', hidMode],
+    ['AIME mode', String(cfg.aimeMode)],
+    ['Virtual AIC', cfg.aimeVirtual ? 'on' : 'off'],
+    ['Main buttons active-high', cfg.tweakMain ? 'on' : 'off'],
+    ['Aux buttons active-high', cfg.tweakAux ? 'on' : 'off'],
+  ];
+
+  const list = document.createElement('dl');
+  list.className = 'profile-params';
+  rows.forEach(([label, value]) => {
+    const dt = document.createElement('dt');
+    dt.textContent = label;
+    const dd = document.createElement('dd');
+    dd.textContent = value;
+    list.append(dt, dd);
+  });
+  section.appendChild(list);
+  return section;
+}
+
+function openProfileView(profile) {
+  if (!isProfile(profile)) { notify('This profile is missing its configuration', 'warn'); return; }
+  els.profileDialogTitle.textContent = profile.name;
+  els.profileDialogDate.textContent = formatDate(profile.savedAt);
+  els.profileDialogBody.textContent = '';
+  els.profileDialogBody.append(buildThresholdView(profile.config), buildParamsView(profile.config));
+  els.profileDialog.showModal();
+}
+
+function buildProfileRow(profile) {
+  const row = document.createElement('div');
+  row.className = 'profile-item';
+
+  const meta = document.createElement('div');
+  meta.className = 'profile-meta';
+  const name = document.createElement('span');
+  name.className = 'profile-name';
+  name.textContent = profile.name;
+  const date = document.createElement('span');
+  date.className = 'profile-date';
+  date.textContent = formatDate(profile.savedAt);
+  meta.append(name, date);
+
+  const actions = document.createElement('div');
+  actions.className = 'profile-actions';
+  actions.append(
+    makeButton('Apply', 'primary', () => applyProfile(profile)),
+    makeButton('View', '', () => openProfileView(profile)),
+    makeButton('Export', '', () => exportProfile(profile)),
+    makeButton('Delete', 'danger', () => deleteProfile(profile.name)),
+  );
+
+  row.append(meta, actions);
+  return row;
+}
+
+function renderProfiles() {
+  const list = loadProfiles();
+  els.profileList.textContent = '';
+  if (!list.length) {
+    const empty = document.createElement('p');
+    empty.className = 'profile-empty';
+    empty.textContent = 'No profiles saved yet. Save the current config above to start.';
+    els.profileList.appendChild(empty);
+    return;
+  }
+  list.forEach((profile) => els.profileList.appendChild(buildProfileRow(profile)));
+}
+
+els.profileSaveForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  saveCurrentProfile(els.profileName.value);
+});
+els.profileImport.addEventListener('click', () => els.profileImportInput.click());
+els.profileImportInput.addEventListener('change', (event) => {
+  const file = event.target.files && event.target.files[0];
+  if (file) importProfileFile(file);
+  event.target.value = '';
+});
+els.profileDialogClose.addEventListener('click', () => els.profileDialog.close());
+
 // --- Threshold and mapping tables ------------------------------------------
 
 const rowRefs = new Map();   // zone -> { thresholdInput, mappingInput, cells }
@@ -1512,6 +1876,230 @@ function consoleHtml(lines) {
   }).join('');
 }
 
+// --- Logs (live per-zone stats + session recording) ------------------------
+
+// Recording is bounded so a forgotten session cannot grow without limit:
+// 30000 samples is ~20 min at the ~25 Hz display rate.
+const LOG_MAX_SAMPLES = 30000;
+const LOG_RENDER_MS = 300;   // stats table / status refresh cadence (~3x/s)
+
+// Per-zone running stats since the last reset. peak: highest delta ever seen;
+// noiseCeil: highest delta while the zone was NOT firmware-active (standby
+// noise floor); triggers: rising edges of the firmware active bitmap.
+const logStats = Array.from({ length: N_Z }, () => ({
+  peak: 0, noiseCeil: 0, triggers: 0, last: 0,
+}));
+const logPrevActive = new Array(N_Z).fill(false);
+const logRows = [];   // per-zone cell refs, index = zone position
+
+const recording = { active: false, startedAt: 0, startIso: '', samples: [] };
+let logLastRender = 0;
+
+function buildLogTable() {
+  els.logRows.textContent = '';
+  logRows.length = 0;
+  zones.forEach((zone, z) => {
+    const row = document.createElement('tr');
+    row.dataset.zone = zone;
+
+    const name = document.createElement('td');
+    name.className = 'zone-name';
+    name.textContent = zone;
+
+    const thr = document.createElement('td');
+    const peak = document.createElement('td');
+    const noise = document.createElement('td');
+    const triggers = document.createElement('td');
+    thr.textContent = '-';
+    peak.textContent = '0';
+    noise.textContent = '0';
+    triggers.textContent = '0';
+
+    row.append(name, thr, peak, noise, triggers);
+    els.logRows.appendChild(row);
+    logRows.push({ row, thr, peak, noise, triggers });
+  });
+}
+
+// Called every frame from render() once config exists: update stats always,
+// push a sample while recording, and refresh the table on a throttle so the
+// DOM is not rebuilt at the full frame rate.
+function logFrame(data) {
+  for (let z = 0; z < N_Z; z += 1) {
+    const e = zoneToElectrode[z];
+    const delta = e >= 0 ? data.deltas[e] : 0;
+    const active = data.zonesActive[z];
+    const s = logStats[z];
+    if (delta > s.peak) s.peak = delta;
+    if (!active && delta > s.noiseCeil) s.noiseCeil = delta;
+    if (active && !logPrevActive[z]) s.triggers += 1;
+    s.last = delta;
+    logPrevActive[z] = active;
+  }
+
+  if (recording.active) recordSample(data);
+
+  const now = performance.now();
+  if (now - logLastRender >= LOG_RENDER_MS) {
+    logLastRender = now;
+    renderLogStats();
+    updateRecordStatus();
+  }
+}
+
+function recordSample(data) {
+  const deltas = new Array(N_Z);
+  const active = new Array(N_Z);
+  for (let z = 0; z < N_Z; z += 1) {
+    const e = zoneToElectrode[z];
+    deltas[z] = e >= 0 ? data.deltas[e] : 0;
+    active[z] = data.zonesActive[z] ? 1 : 0;
+  }
+  recording.samples.push({
+    t: Math.round(performance.now() - recording.startedAt),
+    deltas,
+    active,
+  });
+  if (recording.samples.length >= LOG_MAX_SAMPLES) {
+    stopRecording();
+    notify('Recording full - stopped at the maximum sample count', 'warn');
+  }
+}
+
+function renderLogStats() {
+  for (let z = 0; z < N_Z; z += 1) {
+    const cells = logRows[z];
+    if (!cells) continue;
+    const s = logStats[z];
+    const thr = config ? config.thr[z] : null;
+    cells.thr.textContent = thr == null ? '-' : thr;
+    cells.peak.textContent = s.peak;
+    cells.noise.textContent = s.noiseCeil;
+    cells.triggers.textContent = s.triggers;
+    cells.row.classList.toggle('noisy', thr != null && s.noiseCeil >= thr);
+  }
+}
+
+function resetLogStats() {
+  logStats.forEach((s) => { s.peak = 0; s.noiseCeil = 0; s.triggers = 0; s.last = 0; });
+  logPrevActive.fill(false);
+  renderLogStats();
+  notify('Live stats reset');
+}
+
+function updateRecordUi() {
+  els.logRecord.textContent = recording.active ? 'Stop' : 'Record';
+  els.logRecord.classList.toggle('recording', recording.active);
+  els.logRecord.classList.toggle('primary', !recording.active);
+  els.logRecState.textContent = recording.active ? 'recording' : 'stopped';
+}
+
+function updateRecordStatus() {
+  els.logRecCount.textContent = recording.samples.length;
+  let ms = 0;
+  if (recording.active) ms = performance.now() - recording.startedAt;
+  else if (recording.samples.length) ms = recording.samples[recording.samples.length - 1].t;
+  els.logRecDuration.textContent = `${(ms / 1000).toFixed(1)} s`;
+}
+
+function startRecording() {
+  recording.active = true;
+  recording.startedAt = performance.now();
+  recording.startIso = new Date().toISOString();
+  recording.samples = [];
+  updateRecordUi();
+  updateRecordStatus();
+  notify('Recording started');
+}
+
+function stopRecording() {
+  if (!recording.active) return;
+  recording.active = false;
+  updateRecordUi();
+  updateRecordStatus();
+}
+
+function toggleRecording() {
+  if (!config) { notify('Connect the board before recording', 'warn'); return; }
+  if (recording.active) {
+    stopRecording();
+    notify('Recording stopped');
+  } else {
+    startRecording();
+  }
+}
+
+// A timestamped, filename-safe name for an exported file.
+function logFileName(kind, ext) {
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  return `maipico-${kind}-${stamp}.${ext}`;
+}
+
+function downloadFile(content, type, filename) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function exportSessionCsv() {
+  if (!recording.samples.length) { notify('Nothing recorded yet', 'warn'); return; }
+  const header = ['t_ms', ...zones, ...zones.map((zone) => `${zone}_on`)];
+  const lines = [header.join(',')];
+  for (const s of recording.samples) lines.push([s.t, ...s.deltas, ...s.active].join(','));
+  downloadFile(lines.join('\n'), 'text/csv', logFileName('session', 'csv'));
+}
+
+function exportSessionJson() {
+  if (!recording.samples.length) { notify('Nothing recorded yet', 'warn'); return; }
+  const last = recording.samples[recording.samples.length - 1];
+  const payload = {
+    recordedAt: recording.startIso,
+    durationMs: last ? last.t : 0,
+    zones: [...zones],
+    samples: recording.samples,
+  };
+  downloadFile(JSON.stringify(payload), 'application/json', logFileName('session', 'json'));
+}
+
+function exportStatsCsv() {
+  const header = ['zone', 'threshold', 'peak', 'noise_ceiling', 'triggers'];
+  const lines = [header.join(',')];
+  zones.forEach((zone, z) => {
+    const s = logStats[z];
+    const thr = config ? config.thr[z] : '';
+    lines.push([zone, thr, s.peak, s.noiseCeil, s.triggers].join(','));
+  });
+  downloadFile(lines.join('\n'), 'text/csv', logFileName('stats', 'csv'));
+}
+
+function exportStatsJson() {
+  const stats = zones.map((zone, z) => {
+    const s = logStats[z];
+    return {
+      zone,
+      threshold: config ? config.thr[z] : null,
+      peak: s.peak,
+      noiseCeil: s.noiseCeil,
+      triggers: s.triggers,
+    };
+  });
+  const payload = { recordedAt: new Date().toISOString(), stats };
+  downloadFile(JSON.stringify(payload), 'application/json', logFileName('stats', 'json'));
+}
+
+els.logReset.addEventListener('click', resetLogStats);
+els.logStatsCsv.addEventListener('click', exportStatsCsv);
+els.logStatsJson.addEventListener('click', exportStatsJson);
+els.logRecord.addEventListener('click', toggleRecording);
+els.logSessionCsv.addEventListener('click', exportSessionCsv);
+els.logSessionJson.addEventListener('click', exportSessionJson);
+
 // --- Render ----------------------------------------------------------------
 
 let lastActive = null;
@@ -1631,6 +2219,9 @@ function render(data) {
     while (allBuffers[z].length > SPARK_LEN) allBuffers[z].shift();
   }
   drawGlobalSpark();
+
+  // Live log stats (and a recorded sample when recording), throttled inside.
+  logFrame(data);
 
   trackLearning();
 }
@@ -1795,6 +2386,10 @@ function swapDE(geo) {
 function start() {
   zones = zoneNames();
   buildGlobalLegend();
+  buildLogTable();
+  updateRecordUi();
+  updateRecordStatus();
+  renderProfiles();
   geometry = swapDE({ ...ZONES_GEOMETRY });
 
   buildDisc(els.liveDisc, livePads, (zone) => {
