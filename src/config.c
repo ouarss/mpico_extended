@@ -8,9 +8,15 @@
 
 #include <string.h>
 
+#include "hardware/flash.h"
+
 #include "config.h"
 #include "save.h"
 #include "touch.h"
+
+/* The whole config must fit one save page (4 bytes go to the magic). */
+_Static_assert(sizeof(mai_cfg_t) <= FLASH_PAGE_SIZE - 4,
+               "mai_cfg_t no longer fits the flash save page");
 
 mai_cfg_t *mai_cfg;
 
@@ -19,7 +25,7 @@ static mai_cfg_t default_cfg = {
         .level = 127,
     },
     .sense = {
-        .threshold = { [0 ... 33] = 35 }, // strict by default: fights over-sensitivity
+        .threshold = { [0 ... 33] = SENSE_THRESHOLD_DEFAULT }, // strict: fights over-sensitivity
         .hysteresis = 25,
         .filter = 0x10,
         .avg = 2,
@@ -40,9 +46,11 @@ static mai_cfg_t default_cfg = {
         .per_cab = 1,
     },
     .alt = {
-        .buttons = { -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 },
+        // 0xff is the "use the hardcoded default" sentinel checked by
+        // button.c and rgb.c.
+        .buttons = { [0 ... 11] = 0xff },
         .touch = TOUCH_MAP,
-        .rgb_button = { -1, -1, -1, -1, -1, -1, -1, -1 },
+        .rgb_button = { [0 ... 7] = 0xff },
     },
     .aime = {
         .mode = 0,
@@ -107,8 +115,9 @@ static void config_loaded()
         config_changed();
     }
 
-    if (!in_range(mai_cfg->rgb.per_button, 1, 16) ||
-        !in_range(mai_cfg->rgb.per_cab, 0, 128)) {
+    // Same bound as the rgb command: per_cab / per_banner are 4-bit fields, so
+    // only per_button (a full byte) can actually go out of range.
+    if (!in_range(mai_cfg->rgb.per_button, 0, RGB_PER_UNIT_MAX)) {
         mai_cfg->rgb = default_cfg.rgb;
         config_changed();
     }

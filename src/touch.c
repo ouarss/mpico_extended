@@ -313,30 +313,6 @@ bool touch_sensor_ok(unsigned i)
     return false;
 }
 
-const uint16_t *touch_raw()
-{
-    static uint16_t readout[36] = {0};
-    uint16_t buf[36] = {0};
-
-    for (int i = 0; i < 3; i++) {
-        sensor_ok[i] = mpr121_raw(MPR121_BASE_ADDR + i, buf + i * 12, 12);
-    }
-    memcpy(readout, buf, sizeof(readout));
-
-    return readout;
-}
-
-const uint16_t *map_raw_to_zones(const uint16_t *raw)
-{
-    static uint16_t zones[36];
-
-    for (int i = 0; i < 34; i++) {
-        zones[touch_map[i]] = raw[i];
-    }
-
-    return zones;
-}
-
 const uint16_t *touch_filtered()
 {
     return ts.filtered;

@@ -99,6 +99,8 @@ static void aime_run()
 static mutex_t core1_io_lock;
 static void core1_loop()
 {
+    // Let core0 park this core (out of flash/XIP) during flash writes.
+    multicore_lockout_victim_init();
     while (1) {
         if (mutex_try_enter(&core1_io_lock, NULL)) {
             run_lights();

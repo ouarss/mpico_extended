@@ -17,6 +17,7 @@
    threshold = less sensitive (needs a bigger delta to trigger). */
 #define SENSE_THRESHOLD_MIN 1
 #define SENSE_THRESHOLD_MAX 1000
+#define SENSE_THRESHOLD_DEFAULT 35
 #define SENSE_HYST_MAX 90
 #define SENSE_AVG_MIN 1
 #define SENSE_AVG_MAX 16
@@ -27,8 +28,14 @@
 #define SENSE_GAIN_CDC_MAX 63
 #define SENSE_GAIN_CDT_MAX 7
 
+/* One bound shared by the rgb command and the boot validation: a value the CLI
+   accepts must never be silently reset at the next boot. */
+#define RGB_PER_UNIT_MAX 15
+
 typedef struct __attribute__((packed)) {
     struct {
+        /* Compatibility padding from the upstream layout. Removing it would
+           shift every field that follows and corrupt saved configs - leave it. */
         uint32_t not_used[2];
         uint8_t level;
     } color;
@@ -73,7 +80,6 @@ typedef struct __attribute__((packed)) {
 } mai_cfg_t;
 
 typedef struct {
-    uint16_t fps[2];
     bool key_stuck;
     struct {
         bool touch;

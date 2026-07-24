@@ -10,11 +10,20 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 const CX = 210;
 const CY = 210;
 
+// localStorage can throw (blocked cookies, private mode): a guard here keeps
+// the whole tool alive at the cost of non-persistent preferences/profiles.
+function storageGet(key) {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+function storageSet(key, value) {
+  try { localStorage.setItem(key, value); return true; } catch { return false; }
+}
+
 // Restore the sidebar collapsed state before first paint, so a collapsed rail
 // does not flash to full width on load. This script runs at end of body, so the
 // class lands before the browser paints.
 const SIDEBAR_COLLAPSED_KEY = 'maipico-sidebar-collapsed';
-if (localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1') {
+if (storageGet(SIDEBAR_COLLAPSED_KEY) === '1') {
   document.body.classList.add('sidebar-collapsed');
 }
 
@@ -81,7 +90,6 @@ const els = {
   connect: document.getElementById('connect'),
   disconnect: document.getElementById('disconnect'),
   saveBanner: document.getElementById('save-banner'),
-  saveMessage: document.getElementById('save-message'),
   active: document.getElementById('active'),
   liveDisc: document.getElementById('live-disc'),
   spark: document.getElementById('spark'),
@@ -89,6 +97,7 @@ const els = {
   liveThr: document.getElementById('live-thr'),
   liveThrInput: document.getElementById('live-thr-input'),
   liveThrSave: document.getElementById('live-thr-save'),
+  liveThrReset: document.getElementById('live-thr-reset'),
   sparkAll: document.getElementById('spark-all'),
   sparkAllLegend: document.getElementById('spark-all-legend'),
   viewZone: document.getElementById('view-zone'),
@@ -171,8 +180,14 @@ const connectGate = document.getElementById('connect-gate');
 // Reflect the connection state across the whole shell: lock every tab but
 // Information, and swap the active board-driven section for the shared gate.
 // The connection signal is the same one the old notices used: config !== null.
-function updateConnectGate() {
+let lastGateState = null;   // avoid three querySelectorAll per frame
+
+function updateConnectGate(force) {
   const connected = config !== null;
+  // The nav clicks call this with force=true: the active section changed even
+  // though the connection state did not.
+  if (!force && connected === lastGateState) return;
+  lastGateState = connected;
   document.body.classList.toggle('not-connected', !connected);
   document.querySelectorAll('.nav button').forEach((button) => {
     if (button.dataset.section === 'info') return;
@@ -214,16 +229,14 @@ function editableNumber(value, min, max, onCommit) {
   input.addEventListener('focus', () => { editing = input; });
   input.addEventListener('blur', () => { editing = null; });
   input.addEventListener('change', () => {
+    // Note: `editing` is NOT cleared here - the field still has focus after an
+    // Enter, and a config refresh would overwrite whatever is typed next. The
+    // blur listener releases the guard when focus actually leaves.
     onCommit(input.value);
-    editing = null;
   });
   return input;
 }
 
-function polar(angleDeg, radius) {
-  const rad = (angleDeg * Math.PI) / 180;
-  return [CX + radius * Math.sin(rad), CY - radius * Math.cos(rad)];
-}
 
 /* Area centroid of a polygon: keeps each zone label near the visual middle
    rather than pulled toward whichever edge carries more outline points. */
@@ -449,18 +462,43 @@ function tracedZone() {
   return z === UNMAPPED ? -1 : z;
 }
 
-// Inline threshold editor next to the Trace title: it mirrors the traced zone's
-// threshold and only writes it on the Save button (never on keystroke). The
-// value is refreshed from the board except while the field is being edited.
+// Inline threshold editor next to the Trace title. The field is a DRAFT, not
+// a live mirror: it is seeded when the traced zone changes, follows the board
+// only while untouched, and once edited it keeps the user's value - blur,
+// frames, nothing overwrites it. Save (check) applies it; Reset (arrows,
+// shown only when the draft differs from the board) drops the edit.
+let liveThrZone = -1;     // zone the editor currently shows
+let liveThrBoard = null;  // last board value the field was synced against
+
 function updateLiveThr() {
   const z = tracedZone();
   const show = z >= 0 && Boolean(config);
   els.liveThr.hidden = !show;
-  // Never overwrite while the field has focus, or the per-frame refresh fights
-  // the user's typing. activeElement is authoritative, unlike the shared guard.
-  if (show && document.activeElement !== els.liveThrInput) {
-    els.liveThrInput.value = config.thr[z];
+  if (!show) { liveThrZone = -1; liveThrBoard = null; return; }
+
+  const board = config.thr[z];
+  if (z !== liveThrZone) {
+    // A new zone was traced: seed the draft from the board.
+    liveThrZone = z;
+    liveThrBoard = board;
+    els.liveThrInput.value = board;
+  } else {
+    // An untouched draft follows an external change (profile load, console
+    // thr, auto-cal); an edited draft belongs to the user and never moves.
+    if (Number(els.liveThrInput.value) === liveThrBoard && board !== liveThrBoard) {
+      els.liveThrInput.value = board;
+    }
+    liveThrBoard = board;
   }
+  els.liveThrReset.hidden = Number(els.liveThrInput.value) === board;
+}
+
+function resetLiveThr() {
+  const z = tracedZone();
+  if (z < 0 || !config) return;
+  els.liveThrInput.value = config.thr[z];
+  liveThrBoard = config.thr[z];
+  els.liveThrReset.hidden = true;
 }
 
 function saveLiveThr() {
@@ -471,20 +509,22 @@ function saveLiveThr() {
   v = Math.min(1000, Math.max(1, v));
   els.liveThrInput.value = v;
   send(`thr ${zones[z]} ${v}`);
-  config.thr[z] = v;   // optimistic: avoid a flicker back to the old value until C is republished
-  editing = null;
+  config.thr[z] = v;   // optimistic: no flicker back until C is republished
+  liveThrBoard = v;
+  els.liveThrReset.hidden = true;
   notify(`Threshold ${zones[z]} = ${v}`);
 }
 
 function initLiveThr() {
-  els.liveThrInput.addEventListener('focus', () => { editing = els.liveThrInput; });
-  els.liveThrInput.addEventListener('blur', () => {
-    if (editing === els.liveThrInput) editing = null;
-  });
   els.liveThrInput.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') { event.preventDefault(); saveLiveThr(); }
   });
+  // Keep the input focused through the button presses (nicer when chaining
+  // type -> save -> type again).
+  els.liveThrSave.addEventListener('mousedown', (event) => event.preventDefault());
   els.liveThrSave.addEventListener('click', saveLiveThr);
+  els.liveThrReset.addEventListener('mousedown', (event) => event.preventDefault());
+  els.liveThrReset.addEventListener('click', resetLiveThr);
 }
 
 function drawSpark() {
@@ -612,114 +652,174 @@ const proc = {};
 const OPTION_HELP = {
   hyst: {
     title: 'Release margin (hysteresis)',
-    body: `<p>Once a zone is <b>on</b>, it stays on until its delta falls back to
-      <b>threshold x (1 - hyst%)</b>. This gap stops a reading hovering right at
-      the threshold from rattling on and off.</p>
-      <p>Higher = steadier hold, slightly later release. 0 releases exactly at the
-      threshold. Typical 20-40%.</p>`,
+    body: `<p><b>In one line:</b> once a zone is on, it takes a bigger drop to
+      turn it off again.</p>
+      <p>Think of a door that sticks a little: you have to pull slightly harder
+      to open it than to keep it shut. Without that stickiness, a finger resting
+      exactly at the limit makes the zone chatter on-off-on-off.</p>
+      <p><b>Example</b> - threshold 50, hyst 25%: the zone turns <b>on</b> at 50,
+      and only lets go below <b>37</b> (50 - 25%). Anything wobbling between 37
+      and 50 changes nothing.</p>
+      <p><b>Symptom &rarr; fix:</b> a zone flickers while you hold it &rarr;
+      raise hyst (30-40%). Zones feel like they stay on too long after you lift
+      &rarr; lower it. <b>Cost of raising:</b> the release comes slightly later
+      (never the press).</p>`,
   },
   avg: {
     title: 'Averaging',
-    body: `<p>Averages the last N filtered samples of each electrode before the
-      delta is computed, smoothing electrical noise so a one-frame spike cannot
-      trigger.</p>
-      <p>Every added frame is a frame of latency, so keep it low. <b>1 disables
-      it</b> (lowest latency). Raise it only if a zone still flickers once its
-      threshold is set.</p>`,
+    body: `<p><b>In one line:</b> blur the last N readings together so a single
+      ugly one cannot fire a zone.</p>
+      <p>Like judging someone's mood over a whole minute instead of one blink:
+      one odd instant stops mattering. The cost is that you learn it a moment
+      later.</p>
+      <p><b>Example</b> - readings 5, 6, <b>60</b>, 5 (that 60 is a noise
+      spike). With avg&nbsp;1 the firmware sees 60 and may fire. With avg&nbsp;4
+      it sees (5+6+60+5)/4 = <b>19</b>: no trigger.</p>
+      <p><b>Symptom &rarr; fix:</b> single-frame spikes still trigger even with
+      a sane threshold &rarr; raise to 2-4. <b>Cost:</b> each extra frame is
+      real added lag on <b>every</b> press. Prefer <b>debounce</b> first: it
+      fights spikes without slowing a genuine press as much.</p>`,
   },
   latency: {
     title: 'Added delay (latency)',
-    body: `<p>Holds the final decision back by N frames before it is reported.
-      This is a pure timing offset - it does <b>not</b> filter noise.</p>
-      <p>Leave at 0 unless you specifically need to delay the output. Higher =
-      more input lag.</p>`,
+    body: `<p><b>In one line:</b> deliberately answer late. It filters nothing.</p>
+      <p>The decision is already made; this just sits on it for N frames before
+      telling the game. There is no upside for noise - it is a pure timing
+      offset, kept for the rare setup that needs the touch to line up with
+      something else.</p>
+      <p><b>Example</b> - latency 3: a press decided now is reported ~3&nbsp;ms
+      later. You lose 3&nbsp;ms and gain nothing else.</p>
+      <p><b>Leave it at 0.</b> If a zone is jumpy, the answer is threshold,
+      debounce or averaging - never this.</p>`,
   },
   debounce: {
     title: 'Debounce',
-    body: `<p>A zone must stay above its threshold for <b>on</b> consecutive
-      samples before it turns on, and below the release level for <b>off</b>
-      samples before it turns off.</p>
-      <p>Low <b>on</b> = fast press; higher <b>off</b> = a hold that will not drop
-      out mid-press. This is the main tool against brief spurious triggers.</p>`,
+    body: `<p><b>In one line:</b> "say it twice and I'll believe you". A zone
+      must agree with itself several readings in a row before it changes.</p>
+      <p><b>on</b> = how many readings above the threshold before it turns
+      <b>on</b>. <b>off</b> = how many readings below the release level before
+      it turns <b>off</b>. Noise is brief and never repeats cleanly; a real
+      finger holds for many readings.</p>
+      <p><b>Example</b> - with <b>on&nbsp;3</b>, a spike lasting 1 reading is
+      ignored (it never reaches 3 in a row), while your finger, present for
+      dozens of readings, passes easily.</p>
+      <p><b>Symptom &rarr; fix:</b> phantom clicks while nobody touches the
+      glass &rarr; raise <b>on</b> to 2-4 to smooth them out; <b>cost:</b> each
+      step delays a real press (~3&nbsp;ms per step, see below). A held press
+      drops out for an instant &rarr; raise <b>off</b> to 4-6; that one is
+      nearly free, a late release is not felt.</p>
+      <p>Note: an electrode is re-read every 3rd frame (the three chips take
+      turns), so <b>one debounce step is about 3&nbsp;ms</b>.</p>`,
   },
   gain: {
     title: 'Gain (CDC / CDT)',
-    body: `<p>The MPR121 analog front-end. <b>CDC</b> (charge/discharge current,
-      0-63) and <b>CDT</b> (charge/discharge time, 0-7) set how hard the
-      electrodes are driven - effectively the raw scale of the readings.</p>
-      <p>Higher gain = a bigger delta for the same touch, but also more noise.
-      Change only if deltas are too small or saturating, then re-tune the
-      thresholds.</p>`,
+    body: `<p><b>In one line:</b> the microphone volume of the sensor. Louder
+      signal, but louder hiss too.</p>
+      <p><b>CDC</b> (0-63) is how much current is pushed into the electrode;
+      <b>CDT</b> (0-7) is how long. Together they scale every reading, touch and
+      noise alike - so the <b>ratio</b> between a press and the noise barely
+      changes.</p>
+      <p><b>Example</b> - press peaks at 40 with noise around 8. Double the
+      gain: the press reads ~80, but noise reads ~16. Bigger numbers, same
+      difficulty.</p>
+      <p><b>Symptom &rarr; fix:</b> presses barely move the bar (peaks under
+      ~20) &rarr; raise CDC a little. Readings look pinned at the top
+      (saturated) &rarr; lower it. <b>After any change, re-run the thresholds</b>
+      (auto-calibration): every number just moved.</p>`,
   },
   filter: {
     title: 'Filter (FFI / SFI / ESI)',
-    body: `<p>The MPR121's own smoothing of the raw signal, before the firmware
-      even sees it. Three stages:</p>
-      <p><b>FFI</b> - first-filter samples averaged per reading:
-      0=6, 1=10, 2=18, 3=34. More = smoother but slower.</p>
-      <p><b>SFI</b> - a second averaging stage: 0=4, 1=6, 2=10, 3=18 samples.
-      Same trade-off.</p>
-      <p><b>ESI</b> - time between samples: 0=1&nbsp;ms up to 7=128&nbsp;ms
-      (1/2/4/8/16/32/64/128). Higher spreads samples over more time - steadier
-      against noise, but the reading reacts more slowly.</p>
+    body: `<p><b>In one line:</b> the sensor chip's own smoothing, applied
+      before the firmware ever sees the value.</p>
+      <p>Same idea as taking several photos and keeping the average instead of a
+      single blurry shot. Three knobs, all with the same trade: cleaner signal,
+      slower reaction.</p>
+      <p><b>FFI</b> - readings averaged per sample (0=6, 1=10, 2=18, 3=34).<br>
+      <b>SFI</b> - a second averaging pass (0=4, 1=6, 2=10, 3=18).<br>
+      <b>ESI</b> - the wait between samples, 0=1&nbsp;ms up to 7=128&nbsp;ms.
+      This is the cheapest way to fight noise: spreading samples over time
+      averages it out without extra work.</p>
       <p><b>Combinations to try:</b></p>
       <p>&bull; <code>0 0 0</code> - fastest, noisiest.<br>
       &bull; <code>0 1 0</code> - light and responsive (firmware default).<br>
-      &bull; <code>0 1 3</code> - good anti-noise without much lag.<br>
-      &bull; <code>1 1 4</code> or <code>2 2 4</code> - very clean for noisy
-      panels, at the cost of latency.</p>
-      <p>On a noisy panel with small deltas, raise <b>ESI</b> first (it fights
-      noise cheaply), then <b>SFI</b>; keep FFI low to stay responsive. Pair it
-      with <b>debounce</b> (below) to drop the brief spikes.</p>`,
+      &bull; <code>0 1 3</code> - good anti-noise, barely any lag. Start here if
+      the panel is noisy.<br>
+      &bull; <code>1 1 4</code> / <code>2 2 4</code> - very clean for a bad
+      panel, and you will feel the lag.</p>
+      <p><b>Order to try:</b> raise <b>ESI</b> first, then <b>SFI</b>; keep
+      <b>FFI</b> low to stay responsive. Then let <b>debounce</b> mop up the
+      remaining brief spikes.</p>`,
   },
   baseline: {
-    title: 'Baseline tracking',
-    body: `<p>The <b>baseline</b> is an electrode's level at rest, when nothing
-      touches it - the "zero" a touch is measured against
-      (delta = baseline - filtered).</p>
-      <p>That resting level drifts slowly (temperature, humidity, dust), so it is
-      tracked: the reference follows the drift, so a zone neither creeps toward
-      triggering nor goes numb over time. It is <b>frozen while a zone is held</b>,
-      so a long press is never slowly absorbed and dropped.</p>
-      <p><b>Hardware</b> lets the MPR121 track it internally (recommended,
-      simplest). <b>Software</b> tracks it in the firmware, one step every
-      <i>rate</i> frames - pick it only to set the re-centring speed yourself.</p>
-      <p>This is about slow drift, not speed: it does <b>not</b> affect touch
-      latency. Use <b>Set idle level</b> to re-seed the reference at once.</p>`,
+    title: 'Baseline tracking (the resting reference)',
+    body: `<p><b>In one line:</b> the "zero" each electrode is measured against -
+      what it reads when nobody touches it (<code>delta = baseline -
+      filtered</code>).</p>
+      <p>That zero drifts slowly with temperature, humidity and dust. So it is
+      re-centred continuously: a zone neither creeps toward firing on its own,
+      nor goes deaf over an evening. It is <b>frozen while a zone is held</b>,
+      so a long press is never quietly swallowed.</p>
+      <p><b>This only chooses who keeps that zero up to date</b> - the touch
+      decision (threshold, hysteresis, debounce) is <b>always</b> done by the
+      firmware, in both modes.</p>
+      <p><b>Chip (MPR121)</b> - the sensor tracks its own zero and the firmware
+      reads it. Recommended: it is well tuned and costs nothing.<br>
+      <b>Firmware</b> - the firmware re-centres it itself, one step every
+      <i>rate</i> frames. Pick it only to control that speed yourself (lower
+      rate = re-centres faster).</p>
+      <p>This is about slow drift, not speed: it does <b>not</b> change touch
+      latency. <b>Set idle level</b> re-seeds the zero immediately - do it after
+      moving the cabinet or changing the wiring, with nothing on the glass.</p>`,
   },
   presets: {
     title: 'Presets',
-    body: `<p><b>Default</b> restores the recommended processing values.
-      <b>Flat threshold</b> sets one value on all 34 zones - a quick starting
-      point before fine-tuning. <b>Set idle level</b> re-seeds the baseline from
-      the current (untouched) readings.</p>
-      <p>Nothing here reaches flash until you <b>Save to flash</b>.</p>`,
+    body: `<p><b>Default</b> puts the processing values back to the recommended
+      set. <b>Flat threshold</b> writes one value on all 34 zones - a quick
+      starting point before fine-tuning. <b>Set idle level</b> re-seeds the
+      resting reference from the current (untouched) readings.</p>
+      <p>Nothing here reaches flash until you <b>Save to flash</b>: unplug the
+      board and a bad experiment is gone.</p>`,
   },
   threshold: {
     title: 'Per-zone threshold',
-    body: `<p>The delta a zone must reach to count as touched.
-      <b>Higher = less sensitive.</b></p>
-      <p>Through wires, ITO and glass, real deltas are <b>small</b> and vary with
-      zone size - a firm press might peak around 25-170, while standby noise
-      wanders by about ±10 with the odd spike. Set each threshold just above a
-      zone's own <b>sustained</b> noise, not above the spikes.</p>
-      <p>Then let <b>debounce</b> reject the brief spikes, so the threshold can
-      stay low enough to catch a real (weak) press. Watch the zone's bar or trace
-      to place it.</p>`,
+    body: `<p><b>In one line:</b> how hard a zone must be pushed to count as
+      touched. <b>Higher = less sensitive.</b></p>
+      <p>Every zone is its own little world: a big outer pad and a tiny centre
+      pad do not answer with the same strength, so each gets its own number.</p>
+      <p><b>Example</b> - a zone rests around 5-10 and peaks at 120 when you
+      press it. A threshold of <b>40</b> sits well clear of the noise and well
+      under the press. Too low (10) and it fires on its own; too high (110) and
+      a quick tap is missed.</p>
+      <p><b>The rule:</b> place it just above that zone's <b>sustained</b>
+      noise, not above its rare spikes - then let <b>debounce</b> kill the
+      spikes. That way the threshold stays low enough to catch a light, fast
+      press.</p>
+      <p>Watch the zone's bar or its trace to place it, or let
+      <b>Auto Calibration</b> measure both numbers for you.</p>`,
   },
   level: {
     title: 'Brightness (level)',
-    body: `<p>Global brightness of every LED, from <b>0</b> (off) to <b>255</b>
-      (full). It scales all the button, cabinet and banner LEDs together.</p>
-      <p>Lower it if the LEDs are too bright or draw too much current.</p>`,
+    body: `<p><b>In one line:</b> one dimmer knob for every LED at once.</p>
+      <p>From <b>0</b> (off) to <b>255</b> (full). It scales the button, cabinet
+      and banner LEDs together - the game still chooses the colours, this only
+      decides how bright they come out.</p>
+      <p><b>Example</b> - level 127 (the default) is half brightness: plenty
+      indoors, and it halves the current the LEDs draw.</p>
+      <p>Lower it if the LEDs are dazzling or if the USB supply struggles.</p>`,
   },
   rgb: {
     title: 'LED counts',
-    body: `<p>How many LEDs are wired to each unit, so the firmware drives the
-      right length of chain: <b>button</b> (per ring button), <b>cabinet</b> (per
-      cabinet light) and <b>banner</b>. Each is 0-15; the three are sent
-      together.</p>
-      <p>Set a count to <b>0</b> to disable that group.</p>`,
+    body: `<p>How many <b>addressable pixels in the data chain</b> each unit takes,
+      so the firmware drives the right chain length: <b>button</b> (per ring
+      button), <b>cabinet</b> (per cabinet light) and <b>banner</b>. The firmware
+      repeats each unit's colour this many times down the WS2812 chain.</p>
+      <p>This is <b>not</b> the number of LED packages you can see. Two LEDs wired
+      <b>in parallel</b> (sharing one data line) are a single addressable pixel, so
+      <b>button = 1</b> lights both. Only set <b>2</b> if a button has two pixels
+      chained <b>in series</b> (data-out to data-in), in button order.</p>
+      <p>Too high a count pushes extra pixels and shifts everything after it
+      (cabinet, banner) down the chain. Set a count to <b>0</b> to disable that
+      group.</p>`,
   },
   rgbmap: {
     title: 'Button LED order',
@@ -732,25 +832,33 @@ const OPTION_HELP = {
   },
   hid: {
     title: 'HID mode',
-    body: `<p>How the board reports its inputs to the host over USB.</p>
-      <p><b>IO4 (arcade)</b> emulates the arcade IO4 board - use it with SEGA
-      arcade software. <b>Keyboard 1</b> and <b>Keyboard 2</b> send NKRO keyboard
-      keys (two layouts) for PC play. <b>Off</b> disables HID reporting.</p>`,
+    body: `<p><b>In one line:</b> which kind of device the PC thinks is plugged
+      in.</p>
+      <p><b>IO4 (arcade)</b> pretends to be the real arcade IO board - what SEGA
+      arcade software expects. <b>Keyboard 1 / 2</b> make the buttons type
+      keyboard keys instead (two different layouts), for playing on a PC with
+      normal games. <b>Off</b> reports nothing.</p>
+      <p><b>Careful:</b> the USB identity is decided at boot, so a change only
+      takes effect after <b>Save to flash</b> and a reboot.</p>`,
   },
   aime: {
-    title: 'AIME / NFC',
-    body: `<p>The card reader. <b>Protocol mode</b> selects the reader firmware
-      protocol the host expects (<b>0</b> or <b>1</b>).</p>
-      <p><b>Virtual AIC</b> exposes a virtual card so the game sees a reader even
-      without a physical AIC connected.</p>`,
+    title: 'AIME / NFC card reader',
+    body: `<p><b>In one line:</b> the card reader used to log in.</p>
+      <p><b>Protocol mode</b> (<b>0</b> or <b>1</b>) picks which reader dialect
+      the host expects - if the game does not see the reader, try the other
+      one.</p>
+      <p><b>Virtual AIC</b> makes the board pretend a reader is attached even
+      when none is wired, so the game stops complaining.</p>`,
   },
   tweak: {
     title: 'Button polarity (active-high)',
-    body: `<p>Whether the button inputs read as pressed when driven <b>high</b>
-      instead of low. <b>Main</b> covers the eight play buttons; <b>Aux</b> the
-      Test / Service / Navigate / Coin buttons.</p>
-      <p>Leave off unless the buttons read inverted (stuck on, or released when
-      pressed).</p>`,
+    body: `<p><b>In one line:</b> tells the board whether a pressed button sends
+      a <b>1</b> or a <b>0</b>.</p>
+      <p>Most switches pull the wire down when pressed (active-low, the default).
+      Some optical sensors do the opposite. <b>Main</b> covers the eight play
+      buttons, <b>Aux</b> the Test / Service / Navigate / Coin ones.</p>
+      <p><b>Symptom:</b> a button reads as permanently held, or releases when you
+      press it &rarr; flip the matching switch. Otherwise leave both off.</p>`,
   },
 };
 
@@ -773,7 +881,7 @@ const OPTION_DEFAULTS = {
   debounce: 'on 1, off 3',
   gain: 'cdc 16, cdt 1',
   filter: 'ffi 0, sfi 1, esi 3 for a noisy panel (default 0 1 0)',
-  baseline: 'Hardware',
+  baseline: 'Chip (MPR121), rate 400',
   level: '127',
   rgbmap: 'the factory order (Reset to default)',
   hid: 'IO4 (arcade)',
@@ -888,19 +996,22 @@ function buildProcessing() {
 function buildBaselineControl() {
   const box = document.createElement('div');
   box.className = 'proc';
-  box.appendChild(procHead('Baseline tracking', 'baseline'));
+  box.appendChild(procHead('Resting reference (baseline)', 'baseline'));
 
   const btns = document.createElement('div');
   btns.className = 'proc-btns';
+  // Labelled by WHO keeps the reference current, not "hardware vs software":
+  // the touch decision itself is always the firmware's, in both modes, and the
+  // old wording read as if this switched back to the stock chip detection.
   proc.baselineHw = document.createElement('button');
   proc.baselineHw.type = 'button';
   proc.baselineHw.className = 'seg';
-  proc.baselineHw.textContent = 'Hardware';
+  proc.baselineHw.textContent = 'Chip (MPR121)';
   proc.baselineHw.addEventListener('click', () => send('baseline hw'));
   proc.baselineSoft = document.createElement('button');
   proc.baselineSoft.type = 'button';
   proc.baselineSoft.className = 'seg';
-  proc.baselineSoft.textContent = 'Software';
+  proc.baselineSoft.textContent = 'Firmware';
   proc.baselineSoft.addEventListener('click', () => send('baseline soft'));
   btns.append(proc.baselineHw, proc.baselineSoft);
   box.appendChild(btns);
@@ -909,7 +1020,7 @@ function buildBaselineControl() {
   rate.className = 'proc-flat';
   const rateLabel = document.createElement('span');
   rateLabel.className = 'proc-detail';
-  rateLabel.textContent = 'soft rate';
+  rateLabel.textContent = 'firmware rate';
   proc.rate = editableNumber(0, 1, 60000, (v) => send(`baseline soft ${v}`));
   rate.append(rateLabel, proc.rate);
   box.appendChild(rate);
@@ -971,6 +1082,17 @@ function buildPresetControl() {
   box.appendChild(hint);
   els.processing.appendChild(box);
 }
+
+// HID mode from the io4 / nkro pair the firmware reports - one definition for
+// the Board buttons, the profile apply commands and the summaries.
+function hidModeOf(cfg) {
+  return cfg.hidIo4 === 1 ? 'io4'
+    : cfg.hidNkro === 1 ? 'key1'
+      : cfg.hidNkro === 2 ? 'key2' : 'off';
+}
+const HID_MODE_LABEL = {
+  io4: 'IO4 (arcade)', key1: 'Keyboard 1', key2: 'Keyboard 2', off: 'Off',
+};
 
 // filter is a packed byte: ffi = bits 6-7, sfi = bits 4-5, esi = bits 0-2.
 function decodeFilter(byte) {
@@ -1141,8 +1263,9 @@ function buildBoardLeds() {
       countRow.appendChild(wrap);
     });
   counts.appendChild(countRow);
-  boardHint(counts, 'LED count per button, per cabinet light and for the banner '
-    + '(0-15). The three are sent together.');
+  boardHint(counts, 'Addressable pixels per button, per cabinet light and for the '
+    + 'banner (0-15) - not the visible LED count. Parallel-wired LEDs share one '
+    + 'pixel, so button = 1 lights both. The three are sent together.');
 
   const order = boardCard(grid, 'Button LED order', 'rgbmap');
   order.classList.add('board-wide');
@@ -1284,9 +1407,7 @@ function refreshBoard(cfg) {
   if (!orderDragging) syncLedChips(cfg);
 
   // Current HID mode from the io4 / nkro pair the firmware reports.
-  const hidMode = cfg.hidIo4 === 1 ? 'io4'
-    : cfg.hidNkro === 1 ? 'key1'
-      : cfg.hidNkro === 2 ? 'key2' : 'off';
+  const hidMode = hidModeOf(cfg);
   Object.entries(board.hid).forEach(([mode, btn]) =>
     btn.classList.toggle('on', mode === hidMode));
 
@@ -1326,7 +1447,7 @@ const cloneConfig = (cfg) => (typeof structuredClone === 'function'
   : JSON.parse(JSON.stringify(cfg)));
 
 function loadProfiles() {
-  const raw = localStorage.getItem(PROFILE_STORE_KEY);
+  const raw = storageGet(PROFILE_STORE_KEY);
   if (!raw) return [];
   try {
     const list = JSON.parse(raw);
@@ -1338,15 +1459,23 @@ function loadProfiles() {
 }
 
 function storeProfiles(list) {
-  localStorage.setItem(PROFILE_STORE_KEY, JSON.stringify(list));
+  // Profiles embed a full config each: quota can genuinely run out, and a
+  // silent failure would look like a saved profile that never existed.
+  if (!storageSet(PROFILE_STORE_KEY, JSON.stringify(list))) {
+    notify('Could not store profiles (browser storage unavailable or full)', 'warn');
+  }
 }
 
-// A value is a profile if it carries a config object with a thresholds array -
-// enough to tell a real profile from an unrelated JSON file on import.
+// A value is a profile if it carries a config object with the arrays
+// buildApplyCommands indexes blindly (thr, map, rgbMap): a hand-edited import
+// that lacks one of them would otherwise crash mid-apply, with commands
+// already sent to the board.
 function isProfile(value) {
   return Boolean(value) && typeof value === 'object'
     && Boolean(value.config) && typeof value.config === 'object'
-    && Array.isArray(value.config.thr);
+    && Array.isArray(value.config.thr)
+    && Array.isArray(value.config.map)
+    && Array.isArray(value.config.rgbMap);
 }
 
 function makeButton(text, className, onClick) {
@@ -1478,10 +1607,7 @@ function buildApplyCommands(cfg) {
     cmds.push(`rgbmap ${resolved.join(' ')}`);
   }
 
-  const hidMode = cfg.hidIo4 === 1 ? 'io4'
-    : cfg.hidNkro === 1 ? 'key1'
-      : cfg.hidNkro === 2 ? 'key2' : 'off';
-  cmds.push(`hid ${hidMode}`);
+  cmds.push(`hid ${hidModeOf(cfg)}`);
 
   cmds.push(`aime mode ${cfg.aimeMode}`);
   cmds.push(`aime virtual ${cfg.aimeVirtual ? 'on' : 'off'}`);
@@ -1545,9 +1671,7 @@ function buildParamsView(cfg) {
   section.appendChild(heading);
 
   const filter = decodeFilter(cfg.filter);
-  const hidMode = cfg.hidIo4 === 1 ? 'IO4 (arcade)'
-    : cfg.hidNkro === 1 ? 'Keyboard 1'
-      : cfg.hidNkro === 2 ? 'Keyboard 2' : 'Off';
+  const hidMode = HID_MODE_LABEL[hidModeOf(cfg)];
   const mapped = cfg.map.filter((z) => z !== UNMAPPED).length;
   const rgbOrder = cfg.rgbMap.every((v) => v === UNMAPPED)
     ? 'default'
@@ -1991,7 +2115,7 @@ const LOG_RENDER_MS = 300;   // stats table / status refresh cadence (~3x/s)
 // noiseCeil: highest delta while the zone was NOT firmware-active (standby
 // noise floor); triggers: rising edges of the firmware active bitmap.
 const logStats = Array.from({ length: N_Z }, () => ({
-  peak: 0, noiseCeil: 0, triggers: 0, last: 0,
+  peak: 0, noiseCeil: 0, triggers: 0,
 }));
 const logPrevActive = new Array(N_Z).fill(false);
 const logRows = [];   // per-zone cell refs, index = zone position
@@ -2037,14 +2161,14 @@ function logFrame(data) {
     if (delta > s.peak) s.peak = delta;
     if (!active && delta > s.noiseCeil) s.noiseCeil = delta;
     if (active && !logPrevActive[z]) s.triggers += 1;
-    s.last = delta;
     logPrevActive[z] = active;
   }
 
-  if (config) recordSample(data);   // always record while connected (rolling)
+  recordSample(data);   // always record while connected (render gates on config)
 
+  // Stats collect every frame; the table itself only repaints when visible.
   const now = performance.now();
-  if (now - logLastRender >= LOG_RENDER_MS) {
+  if (activeSection === 'logs' && now - logLastRender >= LOG_RENDER_MS) {
     logLastRender = now;
     renderLogStats();
     updateRecordStatus();
@@ -2087,7 +2211,7 @@ function renderLogStats() {
 }
 
 function resetLogStats() {
-  logStats.forEach((s) => { s.peak = 0; s.noiseCeil = 0; s.triggers = 0; s.last = 0; });
+  logStats.forEach((s) => { s.peak = 0; s.noiseCeil = 0; s.triggers = 0; });
   logPrevActive.fill(false);
   renderLogStats();
   notify('Live stats reset');
@@ -2489,11 +2613,12 @@ function calibPressFrame(data) {
     cel.pressMax.textContent = delta;
   }
   // Prolonged-press detection, independent of the current threshold: the delta
-  // rises a clear margin above the zone's measured noise, holds CALIB_PRESS_HOLD
-  // frames, then falls back below the level -> one counted press.
+  // rises a clear margin above the zone's measured noise (or the firmware calls
+  // the zone active), holds CALIB_PRESS_HOLD frames, then falls back below the
+  // level -> one counted press.
   const level = calib.noiseCeil[z]
     + Math.max(CALIB_PRESS_MARGIN, Math.round(0.5 * calib.noiseCeil[z]));
-  if (delta >= level) {
+  if (delta >= level || data.zonesActive[z]) {
     calib.pressHeld += 1;
     if (calib.pressHeld >= CALIB_PRESS_HOLD) calib.pressInPress = true;
   } else {
@@ -3085,7 +3210,9 @@ function liveCalFrame(data) {
   const now = performance.now();
   if (now - liveCal.lastRender >= LIVE_RENDER_MS) {
     liveCal.lastRender = now;
-    liveCalRenderTable();
+    // Observation keeps running from any tab; the table repaint is only worth
+    // it when the section is on screen.
+    if (activeSection === 'livecal') liveCalRenderTable();
     lcel.elapsed.textContent = `${((now - liveCal.startedAt) / 1000).toFixed(0)} s`;
     if (liveCal.autoApply) liveCalAutoApply(now);
   }
@@ -3173,6 +3300,11 @@ function liveCalInit() {
 
 let lastActive = null;
 
+// Which section is on screen (kept by the nav handler). Painting is gated on
+// it: collection (trace buffers, log stats, calibration measurements) always
+// runs, but the DOM of a hidden tab is not worth updating 25 times a second.
+let activeSection = 'info';
+
 function render(data) {
   els.rate.textContent = data.rate;
   els.link.textContent = data.connected
@@ -3196,7 +3328,9 @@ function render(data) {
     refreshConfig(data.config);
   }
 
-  const consoleSig = data.console.join('\n');
+  // The transport bumps consoleVersion on every write: comparing two integers
+  // replaces re-joining ~200 lines at every frame.
+  const consoleSig = data.consoleVersion || 0;
   if (consoleSig !== lastConsole) {
     lastConsole = consoleSig;
     els.console.innerHTML = consoleHtml(data.console);
@@ -3204,92 +3338,99 @@ function render(data) {
   }
 
   // Active-zone readout and disc highlight, from the firmware's own bitmap.
-  const activeNames = [];
-  zones.forEach((zone, z) => {
-    const active = data.zonesActive[z];
-    if (active) activeNames.push(zone);
-    livePads.get(zone)?.classList.toggle('touched', active);
-  });
-  const activeText = activeNames.length ? activeNames.join('  ') : 'none';
-  if (activeText !== lastActive) {
-    lastActive = activeText;
-    els.active.textContent = activeText;
+  if (activeSection === 'live') {
+    const activeNames = [];
+    zones.forEach((zone, z) => {
+      const active = data.zonesActive[z];
+      if (active) activeNames.push(zone);
+      livePads.get(zone)?.classList.toggle('touched', active);
+    });
+    const activeText = activeNames.length ? activeNames.join('  ') : 'none';
+    if (activeText !== lastActive) {
+      lastActive = activeText;
+      els.active.textContent = activeText;
+    }
   }
 
   if (!config) { drawSpark(); return; }
 
-  // Live zone cards.
-  zones.forEach((zone, z) => {
-    const e = zoneToElectrode[z];
-    const cell = zoneCells[z];
-    if (!cell) return;
-    if (e < 0) {
-      paintCell(cell, '-', '-', 0, -1, false);
-      return;
-    }
-    paintCell(cell, data.filtered[e], baselineOf(e), data.deltas[e],
-      config.thr[z], data.zonesActive[z]);
-  });
+  if (activeSection === 'live') {
+    // Live zone cards.
+    zones.forEach((zone, z) => {
+      const e = zoneToElectrode[z];
+      const cell = zoneCells[z];
+      if (!cell) return;
+      if (e < 0) {
+        paintCell(cell, '-', '-', 0, -1, false);
+        return;
+      }
+      paintCell(cell, data.filtered[e], baselineOf(e), data.deltas[e],
+        config.thr[z], data.zonesActive[z]);
+    });
 
-  // Live electrode cards.
-  for (let e = 0; e < N_E; e += 1) {
-    const cell = electrodeCells[e];
-    if (!cell) continue;
-    const zone = config.map[e];
-    const threshold = zone === UNMAPPED ? -1 : config.thr[zone];
-    const active = zone !== UNMAPPED && data.zonesActive[zone];
-    paintCell(cell, data.filtered[e], baselineOf(e), data.deltas[e], threshold, active);
+    // Live electrode cards.
+    for (let e = 0; e < N_E; e += 1) {
+      const cell = electrodeCells[e];
+      if (!cell) continue;
+      const zone = config.map[e];
+      const threshold = zone === UNMAPPED ? -1 : config.thr[zone];
+      const active = zone !== UNMAPPED && data.zonesActive[zone];
+      paintCell(cell, data.filtered[e], baselineOf(e), data.deltas[e], threshold, active);
+    }
   }
 
   // Threshold / mapping tables, and the threshold-disc tint.
-  zones.forEach((zone, z) => {
-    const e = zoneToElectrode[z];
-    const delta = e < 0 ? 0 : data.deltas[e];
-    const threshold = config.thr[z] || 1;
-    const active = data.zonesActive[z];
+  if (activeSection === 'tuning' || activeSection === 'mapping') {
+    zones.forEach((zone, z) => {
+      const e = zoneToElectrode[z];
+      const delta = e < 0 ? 0 : data.deltas[e];
+      const threshold = config.thr[z] || 1;
+      const active = data.zonesActive[z];
 
-    thrPads.get(zone)?.classList.toggle('touched', active);
-    mapPads.get(zone)?.classList.toggle('touched', active);
-    const thrPad = thrPads.get(zone);
-    if (thrPad) {
-      const ratio = Math.min(1, delta / threshold);
-      thrPad.classList.toggle('rising', !active && ratio > 0.15);
-      thrPad.style.fillOpacity = (active || ratio <= 0.15) ? '' : String(0.15 + ratio * 0.6);
-    }
+      thrPads.get(zone)?.classList.toggle('touched', active);
+      mapPads.get(zone)?.classList.toggle('touched', active);
+      const thrPad = thrPads.get(zone);
+      if (thrPad) {
+        const ratio = Math.min(1, delta / threshold);
+        thrPad.classList.toggle('rising', !active && ratio > 0.15);
+        thrPad.style.fillOpacity = (active || ratio <= 0.15) ? '' : String(0.15 + ratio * 0.6);
+      }
 
-    if (zone === selectedZone && els.thrDialog.open) {
-      els.thrReading.textContent = `${delta} of ${threshold}`;
-      els.thrReading.classList.toggle('over', active);
-    }
+      if (zone === selectedZone && els.thrDialog.open) {
+        els.thrReading.textContent = `${delta} of ${threshold}`;
+        els.thrReading.classList.toggle('over', active);
+      }
 
-    const refs = rowRefs.get(zone);
-    if (refs) {
-      const width = `${Math.min(100, (delta / threshold) * 100)}%`;
-      refs.cells.forEach(({ deviation, gauge }) => {
-        deviation.textContent = delta;
-        deviation.classList.toggle('over', active);
-        gauge.style.width = width;
-        gauge.classList.toggle('over', active);
-      });
-    }
-  });
+      const refs = rowRefs.get(zone);
+      if (refs) {
+        const width = `${Math.min(100, (delta / threshold) * 100)}%`;
+        refs.cells.forEach(({ deviation, gauge }) => {
+          deviation.textContent = delta;
+          deviation.classList.toggle('over', active);
+          gauge.style.width = width;
+          gauge.classList.toggle('over', active);
+        });
+      }
+    });
+  }
 
-  // Trace: append the selected electrode's delta, then redraw.
+  // Trace buffers always accumulate (a trace must not have holes from time
+  // spent on another tab); only the drawing is gated on the visible section.
   const target = selectionTarget();
   if (target && target.electrode >= 0) {
     sparkBuffer.push(data.deltas[target.electrode]);
     while (sparkBuffer.length > SPARK_LEN) sparkBuffer.shift();
   }
-  drawSpark();
-  updateLiveThr();   // keep the inline threshold in sync (skips while editing)
-
-  // Global trace: push every zone's delta and redraw all lines.
   for (let z = 0; z < N_Z; z += 1) {
     const e = zoneToElectrode[z];
     allBuffers[z].push(e >= 0 ? data.deltas[e] : 0);
     while (allBuffers[z].length > SPARK_LEN) allBuffers[z].shift();
   }
-  drawGlobalSpark();
+  if (activeSection === 'live') {
+    drawSpark();
+    drawGlobalSpark();
+    updateLiveThr();   // keep the inline threshold in sync (skips while editing)
+  }
 
   // Live log stats (and a recorded sample when recording), throttled inside.
   logFrame(data);
@@ -3314,7 +3455,7 @@ function syncSidebarToggle(collapsed) {
 syncSidebarToggle(document.body.classList.contains('sidebar-collapsed'));
 sidebarToggle.addEventListener('click', () => {
   const collapsed = document.body.classList.toggle('sidebar-collapsed');
-  localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? '1' : '0');
+  storageSet(SIDEBAR_COLLAPSED_KEY, collapsed ? '1' : '0');
   syncSidebarToggle(collapsed);
 });
 
@@ -3325,10 +3466,21 @@ document.querySelectorAll('.nav button').forEach((button) => {
     document.querySelectorAll('.section').forEach((section) => {
       section.classList.toggle('active', section.dataset.section === button.dataset.section);
     });
+    activeSection = button.dataset.section;
+    // Repaint right away with the collected data, rather than waiting up to
+    // one frame period for the gated blocks to run again.
+    if (config) render(state);
     stopCalibration();
+    // A running noise/press measurement off-screen would record meaningless
+    // data; results already computed (and the standby verify, which needs no
+    // interaction) are left intact.
+    if (button.dataset.section !== 'calibration'
+        && (calib.phase === 'noise' || calib.phase === 'press')) {
+      calibStop();
+    }
     // A locked tab navigates as usual, then shows the gate in place of its
     // content; Information (never locked) shows normally.
-    updateConnectGate();
+    updateConnectGate(true);
   });
 });
 
@@ -3482,6 +3634,7 @@ function swapDE(geo) {
 
 function start() {
   zones = zoneNames();
+  activeSection = document.querySelector('.nav button.active')?.dataset.section || 'info';
   buildGlobalLegend();
   buildLogTable();
   updateRecordStatus();
@@ -3520,7 +3673,7 @@ function start() {
 
   // Lock the shell before the first frame arrives, so the tabs read correctly
   // on load rather than only after the first render.
-  updateConnectGate();
+  updateConnectGate(true);
 }
 
 start();

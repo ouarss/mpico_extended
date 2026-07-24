@@ -56,6 +56,11 @@ static void save_program()
     printf("\nProgram Flash %d %8lx\n", data_page, old_data.magic);
     if (mutex_enter_timeout_us(io_lock, 100000)) {
         sleep_ms(10); /* wait for all io operations to finish */
+        // Park core1 out of XIP: it must not fetch code from flash while the
+        // sector is being erased/programmed (a cache miss there would fault).
+        // Timeout rather than blocking, in case core1 is not up yet - then we
+        // proceed as before, which is no worse than the old behaviour.
+        bool locked_out = multicore_lockout_start_timeout_us(100000);
         uint32_t ints = save_and_disable_interrupts();
         if (data_page == 0) {
             flash_range_erase(SAVE_SECTOR_OFFSET, FLASH_SECTOR_SIZE);
@@ -63,6 +68,9 @@ static void save_program()
         flash_range_program(SAVE_SECTOR_OFFSET + data_page * FLASH_PAGE_SIZE,
                             (uint8_t *)&old_data, FLASH_PAGE_SIZE);
         restore_interrupts(ints);
+        if (locked_out) {
+            multicore_lockout_end_blocking();
+        }
         mutex_exit(io_lock);
     } else {
         printf("Program Flash Failed.\n");
@@ -154,7 +162,11 @@ void save_loop()
 void *save_alloc(size_t size, void *def, void (*after_load)())
 {
     modules[module_num].size = size;
-    size_t offset = module_num > 0 ? modules[module_num - 1].offset + size : 0;
+    // Next free byte = previous module's offset plus the PREVIOUS module's
+    // size (the old formula added the new size, a latent bug hidden as long
+    // as only one module existed).
+    size_t offset = module_num > 0
+        ? modules[module_num - 1].offset + modules[module_num - 1].size : 0;
     modules[module_num].offset = offset;
     modules[module_num].after_load = after_load;
     module_num++;

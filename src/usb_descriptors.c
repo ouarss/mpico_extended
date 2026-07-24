@@ -180,12 +180,17 @@ uint16_t const* tud_descriptor_string_cb(uint8_t index, uint16_t langid)
 {
     static uint16_t _desc_str[128];
 
+    // A host is free to ask for any index: past the table means "no string".
+    if (index >= sizeof(string_desc_arr) / sizeof(string_desc_arr[0])) {
+        return NULL;
+    }
+
     if (index == 0) {
         memcpy(&_desc_str[1], string_desc_arr[0], 2);
         _desc_str[0] = (TUSB_DESC_STRING << 8) | (2 + 2);
         return _desc_str;
     }
-    
+
     if (index == 3) {
         pico_unique_board_id_t board_id;
         pico_get_unique_board_id(&board_id);
@@ -193,13 +198,14 @@ uint16_t const* tud_descriptor_string_cb(uint8_t index, uint16_t langid)
     }
 
     const char *str = string_desc_arr[index];
-    uint8_t chr_count = strlen(str);
-    if (chr_count > 128) {
-        chr_count = 128;
+    size_t chr_count = strlen(str);
+    // Slot 0 carries the header, so at most 127 characters fit the buffer.
+    if (chr_count > 127) {
+        chr_count = 127;
     }
 
     // Convert ASCII string into UTF-16
-    for (uint8_t i = 0; i < chr_count; i++) {
+    for (size_t i = 0; i < chr_count; i++) {
         _desc_str[1 + i] = str[i];
     }
 

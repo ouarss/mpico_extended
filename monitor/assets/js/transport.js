@@ -28,6 +28,20 @@ const ENCODER = new TextEncoder();
 /** Append with a rolling cap - one definition of the log semantics. */
 const pushCapped = (list, item, cap) => [...list, item].slice(-cap);
 
+/** Console writes bump a version counter so the page can detect a change by
+ *  comparing two integers instead of re-joining ~200 lines every frame. */
+function logConsole(state, text) {
+  state.console = pushCapped(state.console, text, CONSOLE_LINES);
+  state.consoleVersion = (state.consoleVersion || 0) + 1;
+}
+
+/** A C line must at least carry the arrays the page indexes blindly; a
+ *  truncated-but-valid JSON would otherwise crash every later render. */
+function isUsableConfig(c) {
+  return c && Array.isArray(c.thr) && c.thr.length === N_ZONES
+    && Array.isArray(c.map) && c.map.length === N_ELECTRODES;
+}
+
 /**
  * A 16-hex zone bitmap is 64 bits, past the 2^53 exact-integer range, so it is
  * read as two 32-bit halves. The high half (first 8 hex) carries bits 63..32,
@@ -57,9 +71,12 @@ function createParser(state, onUpdate) {
     // Config JSON, republished on `feed on` and after every setting change.
     if (trimmed[0] === 'C' && trimmed[1] === ' ') {
       try {
-        state.config = JSON.parse(trimmed.slice(2));
-        onUpdate();
-        return;
+        const parsed = JSON.parse(trimmed.slice(2));
+        if (isUsableConfig(parsed)) {
+          state.config = parsed;
+          onUpdate();
+          return;
+        }
       } catch { /* truncated line, ignore */ }
     }
 
@@ -85,7 +102,7 @@ function createParser(state, onUpdate) {
     }
 
     // Anything else - command echoes, replies, diagnostics - is console text.
-    state.console = pushCapped(state.console, text, CONSOLE_LINES);
+    logConsole(state, text);
     onUpdate();
   };
 }
@@ -181,8 +198,7 @@ function webSerialTransport(state, onUpdate) {
 
     async send(command) {
       if (!writer) {
-        state.console = pushCapped(state.console,
-          `not connected: ${command}`, CONSOLE_LINES);
+        logConsole(state, `not connected: ${command}`);
         onUpdate();
         return;
       }
@@ -191,14 +207,14 @@ function webSerialTransport(state, onUpdate) {
       } catch (error) {
         // A silent failure here is the worst kind: the control looks dead and
         // nothing explains why.
-        state.console = pushCapped(state.console,
-          `send failed: ${error.message || error}`, CONSOLE_LINES);
+        logConsole(state, `send failed: ${error.message || error}`);
         onUpdate();
       }
     },
 
     clear() {
       state.console = [];
+      state.consoleVersion = (state.consoleVersion || 0) + 1;
       onUpdate();
     },
 

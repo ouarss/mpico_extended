@@ -71,21 +71,29 @@ static void disp_sense()
 static bool feeding = false;
 
 // Machine-readable sensitivity config for the monitor (one JSON line, tag 'C').
+// Built in one buffer and emitted in a single write: ~80 tiny printf calls at
+// 2 Hz used to hammer the USB stdio path from inside the 1 kHz loop.
 static void feed_publish_config()
 {
-    printf("\nC {\"thr\":[");
+    char line[800];   // worst case ~660 bytes, all appends are snprintf-bounded
+    int n = 0;
+    n += snprintf(line + n, sizeof(line) - n, "\nC {\"thr\":[");
     for (int i = 0; i < 34; i++) {
-        printf(i ? ",%u" : "%u", mai_cfg->sense.threshold[i]);
+        n += snprintf(line + n, sizeof(line) - n,
+                      i ? ",%u" : "%u", mai_cfg->sense.threshold[i]);
     }
-    printf("],\"map\":[");
+    n += snprintf(line + n, sizeof(line) - n, "],\"map\":[");
     for (int i = 0; i < 36; i++) {
-        printf(i ? ",%u" : "%u", mai_cfg->alt.touch[i]);
+        n += snprintf(line + n, sizeof(line) - n,
+                      i ? ",%u" : "%u", mai_cfg->alt.touch[i]);
     }
-    printf("],\"rgbMap\":[");
+    n += snprintf(line + n, sizeof(line) - n, "],\"rgbMap\":[");
     for (int i = 0; i < 8; i++) {
-        printf(i ? ",%u" : "%u", mai_cfg->alt.rgb_button[i]);
+        n += snprintf(line + n, sizeof(line) - n,
+                      i ? ",%u" : "%u", mai_cfg->alt.rgb_button[i]);
     }
-    printf("],\"hyst\":%u,\"filter\":%u,\"avg\":%u,\"latency\":%u,"
+    snprintf(line + n, sizeof(line) - n,
+           "],\"hyst\":%u,\"filter\":%u,\"avg\":%u,\"latency\":%u,"
            "\"baselineMode\":%u,\"rate\":%u,\"gainCdc\":%u,\"gainCdt\":%u,"
            "\"debounceOn\":%u,\"debounceOff\":%u,"
            "\"level\":%u,\"rgbButton\":%u,\"rgbCab\":%u,\"rgbBanner\":%u,"
@@ -103,16 +111,23 @@ static void feed_publish_config()
            mai_cfg->tweak.main_button_active_high,
            mai_cfg->tweak.aux_button_active_high,
            save_pending() ? "false" : "true");
+    printf("%s", line);
 }
 
-// Common tail after any sensitivity change: persist, notify the monitor, echo.
-static void sense_changed()
+// Common tail after any config change: persist, notify the monitor, echo the
+// section that changed.
+static void config_changed_and_show(void (*disp)())
 {
     config_changed();
     if (feeding) {
         feed_publish_config();
     }
-    disp_sense();
+    disp();
+}
+
+static void sense_changed()
+{
+    config_changed_and_show(disp_sense);
 }
 
 static void disp_hid()
@@ -206,10 +221,6 @@ void handle_display(int argc, char *argv[])
         return;
     }
 
-    if (choice > ARRAYSIZE(disp_funcs)) {
-        return;
-    }
-
     disp_funcs[choice]();
 }
 
@@ -229,7 +240,8 @@ static void handle_rgb(int argc, char *argv[])
     int per_banner = cli_extract_non_neg_int(argv[2], 0);
 
     if ((per_button < 0) || (per_cab < 0) || (per_banner < 0) ||
-        (per_button > 15) || (per_cab > 15) || (per_banner > 15)) {
+        (per_button > RGB_PER_UNIT_MAX) || (per_cab > RGB_PER_UNIT_MAX) ||
+        (per_banner > RGB_PER_UNIT_MAX)) {
         printf(usage);
         return;
     }
@@ -238,9 +250,7 @@ static void handle_rgb(int argc, char *argv[])
     mai_cfg->rgb.per_cab = per_cab;
     mai_cfg->rgb.per_banner = per_banner;
 
-    config_changed();
-    if (feeding) feed_publish_config();
-    disp_rgb();
+    config_changed_and_show(disp_rgb);
 }
 
 static void handle_level(int argc, char *argv[])
@@ -258,22 +268,19 @@ static void handle_level(int argc, char *argv[])
     }
 
     mai_cfg->color.level = level;
-    config_changed();
-    if (feeding) feed_publish_config();
-    disp_rgb();
+    config_changed_and_show(disp_rgb);
 }
 
 static void handle_stat(int argc, char *argv[])
 {
     if (argc == 0) {
-        for (int col = 0; col < 4; col++) {
-            printf(" %2dA |", col * 4 + 1);
-            for (int i = 0; i < 4; i++) {
-                printf("%6u|", touch_count(col * 8 + i * 2));
-            }
-            printf("\n   B |");
-            for (int i = 0; i < 4; i++) {
-                printf("%6u|", touch_count(col * 8 + i * 2 + 1));
+        // One row per zone family: A1..A8, B1..B8, C1-C2, D1..D8, E1..E8.
+        // (The old 32-key grid layout hid E7/E8 entirely.)
+        for (int zone = 0; zone < 34; ) {
+            printf("  %c |", touch_key_name(zone)[0]);
+            int row_end = (zone == 16) ? zone + 2 : zone + 8;
+            for (; zone < row_end; zone++) {
+                printf("%6u|", touch_count(zone));
             }
             printf("\n");
         }
@@ -319,9 +326,7 @@ static void handle_hid(int argc, char *argv[])
             mai_cfg->hid.nkro = 0;
             break;
     }
-    config_changed();
-    if (feeding) feed_publish_config();
-    disp_hid();
+    config_changed_and_show(disp_hid);
 }
 
 static void handle_filter(int argc, char *argv[])
@@ -355,25 +360,12 @@ static void handle_filter(int argc, char *argv[])
     sense_changed();
 }
 
+// Zone name -> index, via the one parser touch.c already has. XX (255) names
+// an unconnected electrode, not a zone, so it is rejected here.
 static int extract_zone(const char *param)
 {
-    if (strlen(param) != 2) {
-        return -1;
-    }
-
-    int zone = toupper((unsigned char)param[0]) - 'A';
-    int id = param[1] - '1';
-
-    if (zone < 0 || zone > 4 || id < 0 || id > 7) {
-        return -1;
-    }
-    if ((zone == 2) && (id > 1)) {
-        return -1; // C1 and C2 only
-    }
-
-    const int offsets[] = { 0, 8, 16, 18, 26 };
-
-    return offsets[zone] + id;
+    int key = touch_key_by_name(param);
+    return (key < 0 || key >= 34) ? -1 : key;
 }
 
 static void handle_thr(int argc, char *argv[])
@@ -527,7 +519,7 @@ static void handle_preset(int argc, char *argv[])
     }
     if (strcasecmp(argv[0], "default") == 0) {
         for (int i = 0; i < 34; i++) {
-            mai_cfg->sense.threshold[i] = 35;
+            mai_cfg->sense.threshold[i] = SENSE_THRESHOLD_DEFAULT;
         }
     } else if ((strcasecmp(argv[0], "flat") == 0) && (argc == 2)) {
         int v = cli_extract_non_neg_int(argv[1], 0);
@@ -548,7 +540,9 @@ static void handle_preset(int argc, char *argv[])
 static void handle_debounce(int argc, char *argv[])
 {
     const char *usage = "Usage: debounce <on> [off]\n"
-                        "  on, off: consecutive samples before ON/OFF, 0..15\n";
+                        "  on, off: consecutive samples before ON/OFF, 0..15\n"
+                        "  Note: each electrode is re-read every 3rd frame\n"
+                        "  (sensor round-robin), so one sample step is ~3 ms.\n";
     if ((argc < 1) || (argc > 2)) {
         printf(usage);
         return;
@@ -699,9 +693,7 @@ static void handle_rgbmap(int argc, char *argv[])
         printf(usage);
         return;
     }
-    config_changed();
-    if (feeding) feed_publish_config();
-    disp_rgb();
+    config_changed_and_show(disp_rgb);
 }
 
 static void detect_touch()
@@ -711,7 +703,9 @@ static void detect_touch()
         if (touch_touched(i)) {
             touched = true;
             printf("Touched: %s", touch_key_name(i));
-            uint8_t pad = touch_key_channel(i);
+            // int, not uint8_t: -1 means "no electrode mapped" and must stay
+            // negative for the test below.
+            int pad = touch_key_channel(i);
             if (pad >= 0) {
                 printf(" (Sensor %d, Electrode %d)\n", pad / 12, pad % 12 + 1);
             } else {
@@ -849,9 +843,7 @@ static void handle_tweak(int argc, char *argv[])
         mai_cfg->tweak.aux_button_active_high = active;
     }
 
-    config_changed();
-    if (feeding) feed_publish_config();
-    disp_tweak();
+    config_changed_and_show(disp_tweak);
 }
 
 // Machine data frame for the monitor (tag 'F'): 36 filtered, 36 delta, then the
@@ -897,6 +889,33 @@ void commands_feed_poll()
     }
     last = now;
     feed_frame_line();
+}
+
+// The io.c DEBUG traces (game-link touch/LED commands) are compiled in but
+// used to be unreachable: nothing ever set the runtime flags.
+static void handle_debug(int argc, char *argv[])
+{
+    const char *usage = "Usage: debug <touch|led> <on|off>\n"
+                        "  Trace game-link commands on the console.\n";
+    if (argc != 2) {
+        printf(usage);
+        return;
+    }
+    const char *what[] = {"touch", "led"};
+    const char *switches[] = {"on", "off"};
+    int target = cli_match_prefix(what, 2, argv[0]);
+    int on_off = cli_match_prefix(switches, 2, argv[1]);
+    if ((target < 0) || (on_off < 0)) {
+        printf(usage);
+        return;
+    }
+    bool on = (on_off == 0);
+    if (target == 0) {
+        mai_runtime.debug.touch = on;
+    } else {
+        mai_runtime.debug.led = on;
+    }
+    printf("Debug %s: %s\n", what[target], on ? "on" : "off");
 }
 
 static void handle_feed(int argc, char *argv[])
@@ -946,4 +965,5 @@ void commands_init()
     cli_register("tweak", handle_tweak, "Miscellaneous tweak options.");
     cli_register("factory", config_factory_reset, "Reset everything to default.");
     cli_register("aime", handle_aime, "AIME settings.");
+    cli_register("debug", handle_debug, "Trace game-link commands (touch/led).");
 }

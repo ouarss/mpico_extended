@@ -12,7 +12,6 @@
 
 #define MAX_COMMANDS 32
 #define MAX_PARAMETERS 10
-#define MAX_PARAMETER_LENGTH 20
 
 const char *cli_prompt = "cli>";
 const char *cli_logo = "CLI";
@@ -122,7 +121,8 @@ static void process_cmd()
 
     char *cmd = strtok(cmd_buf, " \n");
 
-    if (strlen(cmd) == 0) {
+    // strtok returns NULL on a blank line (a bare Enter at the prompt).
+    if (!cmd || cmd[0] == '\0') {
         return;
     }
 

@@ -137,8 +137,11 @@ static bool mpr121_read_many(uint8_t addr, uint8_t reg, uint8_t *buf, size_t n)
 {
     i2c_write_blocking_until(I2C_PORT, addr, &reg, 1, true,
                              time_us_64() + IO_TIMEOUT_US);
+    // ~22.5 us per byte at 400 kHz: base timeout plus a generous per-byte
+    // margin. The old `* n / 2` bound let a stuck bus freeze a frame for
+    // 12 ms; this caps the worst case around 2 ms for a full 24-byte read.
     int bytes = i2c_read_blocking_until(I2C_PORT, addr, buf, n, false,
-                                        time_us_64() + IO_TIMEOUT_US * n / 2);
+                                        time_us_64() + IO_TIMEOUT_US + n * 30);
     return bytes == n;
 }
 
@@ -153,13 +156,6 @@ static bool mpr121_read_many16(uint8_t addr, uint8_t reg, uint16_t *buf, size_t 
         buf[i] = (vals[i * 2 + 1] << 8) | vals[i * 2];
     }
     return true;
-}
-
-uint16_t mpr121_touched(uint8_t addr)
-{
-    uint16_t touched = 0;
-    mpr121_read_many16(addr, MPR121_TOUCH_STATUS_REG, &touched, 1);
-    return touched;
 }
 
 bool mpr121_raw(uint8_t addr, uint16_t *raw, int num)
@@ -196,40 +192,6 @@ void mpr121_filter(uint8_t addr, uint8_t ffi, uint8_t sfi, uint8_t esi)
     write_reg(addr, MPR121_FILTER_CONFIG_REG,
               (fcr & 0xe0) | ((sfi & 3) << 3) | esi);
 
-    mpr121_resume(addr, ecr);
-}
-
-// Keep the register value inside the usable 8-bit range. A wide sense offset
-// would otherwise push the subtraction below zero and wrap to a huge value,
-// which the MPR121 reads as "never touched".
-static uint8_t clamp_threshold(int value)
-{
-    if (value < 1) {
-        return 1;
-    }
-    if (value > 254) {
-        return 254;
-    }
-    return value;
-}
-
-void mpr121_sense(uint8_t addr, int8_t sense, int8_t *sense_keys, int num)
-{
-    uint8_t ecr = mpr121_stop(addr);
-    for (int i = 0; i < num; i++) {
-        int delta = sense + sense_keys[i];
-        write_reg(addr, MPR121_TOUCH_THRESHOLD_REG + i * 2,
-                        clamp_threshold(TOUCH_THRESHOLD_BASE - delta));
-        write_reg(addr, MPR121_RELEASE_THRESHOLD_REG + i * 2,
-                        clamp_threshold(RELEASE_THRESHOLD_BASE - delta / 2));
-    }
-    mpr121_resume(addr, ecr);
-}
-
-void mpr121_debounce(uint8_t addr, uint8_t touch, uint8_t release)
-{
-    uint8_t ecr = mpr121_stop(addr);
-    write_reg(addr, 0x5B, (release & 0x07) << 4 | (touch & 0x07));
     mpr121_resume(addr, ecr);
 }
 

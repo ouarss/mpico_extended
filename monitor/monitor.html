@@ -103,6 +103,10 @@
         <button type="button" data-topic="detection">How detection works</button>
         <button type="button" data-topic="compare">Old vs new</button>
         <button type="button" data-topic="guide">Avoiding false triggers</button>
+        <button type="button" data-topic="autocal">Auto Calibration</button>
+        <button type="button" data-topic="livecal">Live Calibration</button>
+        <button type="button" data-topic="logs">Logs</button>
+        <button type="button" data-topic="profiles">Profiles &amp; saving</button>
         <button type="button" data-topic="connection">Connection</button>
         <button type="button" data-topic="protocol">Protocol</button>
       </nav>
@@ -160,12 +164,29 @@
             <li><strong>Latency</strong> &mdash; an optional extra hold, to line
               the input up with a slower device.</li>
           </ol>
-          <h3>Baseline: hardware vs software</h3>
-          <p><strong>Hardware</strong> baseline uses the MPR121's own tracking.
-            <strong>Software</strong> baseline lets the firmware track it, at a
-            configurable rate. Tracking freezes while a zone is held, so a
-            sustained press can never be absorbed. <em>Set idle level</em>
-            (<code>rebase</code>) retakes the reference at once.</p>
+          <h3>The resting reference (baseline)</h3>
+          <p>The baseline is the &laquo;&nbsp;zero&nbsp;&raquo; each electrode is
+            measured against. It drifts slowly with temperature, humidity and
+            dust, so it is re-centred continuously &mdash; otherwise a zone would
+            slowly creep toward firing on its own, or go deaf. Re-centring
+            <strong>freezes while a zone is held</strong>, so a long press is
+            never quietly swallowed. <em>Set idle level</em>
+            (<code>rebase</code>) retakes the reference immediately.</p>
+          <p>The Tuning tab lets you choose <strong>who keeps that zero up to
+            date</strong>:</p>
+          <ul class="info-steps">
+            <li><strong>Chip (MPR121)</strong> &mdash; the sensor tracks its own
+              zero and the firmware just reads it. Recommended: well tuned, and
+              free.</li>
+            <li><strong>Firmware</strong> &mdash; the firmware re-centres it
+              itself, one step every <em>rate</em> frames. Only useful to control
+              that speed yourself.</li>
+          </ul>
+          <p class="info-warn"><strong>Not to be confused with the old
+            detection.</strong> This choice only decides who maintains the
+            resting reference. The touch decision itself &mdash; threshold,
+            release margin, debounce &mdash; is <strong>always</strong> made by
+            the firmware, in both modes. See <em>Old vs new</em>.</p>
           <h3>Timing</h3>
           <p>The control loop runs at <strong>1 kHz</strong>. The three sensors
             are read one per frame (round-robin), so each refreshes about every
@@ -176,25 +197,38 @@
 
         <article data-topic="compare">
           <h2>Old vs new detection</h2>
-          <p>The stock Mai Pico firmware and this firmware decide a touch in
-            fundamentally different places.</p>
+          <p>The stock Mai Pico firmware and this one decide a touch in
+            fundamentally different places. <strong>This is not a setting</strong>
+            &mdash; the new way is now the only way; there is no switch back.</p>
+
+          <p class="info-warn"><strong>Careful with the word
+            &laquo;&nbsp;hardware&nbsp;&raquo;.</strong> It means two different
+            things in this tool. Here it is about <em>who decides a touch</em>
+            (settled: the firmware). In Tuning, <em>Chip&nbsp;/&nbsp;Firmware</em>
+            is only about <em>who keeps the resting reference up to date</em> &mdash;
+            picking &laquo;&nbsp;Chip&nbsp;&raquo; does <strong>not</strong> bring
+            the old detection back.</p>
 
           <h3>Native (stock) detection</h3>
-          <p>Each MPR121 decides on its own, in hardware; the firmware only reads
-            the chip's touched / not-touched bitmap. Sensitivity was a coarse
+          <p>Each MPR121 decided on its own, inside the chip; the firmware only
+            read a touched / not-touched flag. Sensitivity was a coarse
             <em>offset</em> (about -30 to +30) around fixed base thresholds (touch
             22, release 15), nudged one step at a time with <code>sense +</code> /
-            <code>sense -</code>. The chip tracks its own baseline and freezes it
-            while an electrode is held.</p>
+            <code>sense -</code>. You could never see <em>by how much</em> a zone
+            had passed &mdash; only that it had.</p>
 
           <h3>New (software) detection</h3>
-          <p>The firmware reads the MPR121 <strong>filtered value</strong> and
-            <strong>baseline</strong> per electrode and decides itself:
+          <p>The firmware reads each electrode's <strong>filtered value</strong>
+            and <strong>resting reference</strong> and decides for itself:
             <code>delta = baseline - filtered</code> against an
-            <strong>absolute per-zone threshold</strong>, with a release margin
-            (hysteresis), a debounce count, optional averaging and latency, and a
-            choice of hardware or software baseline. The MPR121 is still used,
-            tuned as a clean front-end (gain, filter).</p>
+            <strong>absolute per-zone threshold</strong>, with a release margin,
+            a debounce count, optional averaging and latency. The MPR121 is still
+            very much used &mdash; as a clean front-end (gain, filter) and as the
+            keeper of the resting reference.</p>
+          <p>That visibility is what makes everything else possible: the traces,
+            the logs, the auto-calibration and the live calibration all need to
+            know <em>how far</em> a zone moved. None of them can exist on top of a
+            bare on/off flag.</p>
 
           <table class="info-table">
             <thead><tr><th></th><th>Native (stock)</th><th>New (software)</th></tr></thead>
@@ -264,6 +298,142 @@
             <li>When it behaves, press <strong>Save to flash</strong> &mdash;
               nothing survives a power cycle until you do.</li>
           </ol>
+          <p>Doing this by hand for 34 zones is tedious &mdash;
+            <strong>Auto Calibration</strong> measures both numbers for you.</p>
+        </article>
+
+        <article data-topic="autocal">
+          <h2>Auto Calibration</h2>
+          <p><strong>In one line:</strong> the wizard listens to your panel and
+            works out every threshold for you, instead of you guessing 34
+            numbers.</p>
+          <p>It needs two facts per zone: how much the zone <em>wiggles on its
+            own</em> (noise), and how far it moves <em>when you press it</em>
+            (press peak). A good threshold sits comfortably between the two.</p>
+          <pre class="info-diagram">press peak  ~120  ####################   &lt;-- a real press reaches here
+                                       |
+threshold     40  ------------------   &lt;-- put the bar in the gap
+                                       |
+noise ceiling  8  ##                   &lt;-- the zone never gets past here alone</pre>
+
+          <h3>The five steps</h3>
+          <ol class="info-steps">
+            <li><strong>Noise</strong> &mdash; 15 seconds, <em>hands off the
+              glass</em>. Each zone records the highest delta it reaches all by
+              itself.</li>
+            <li><strong>Press</strong> &mdash; zone by zone, at your own pace:
+              press firmly, release, repeat. The wizard counts real presses (a
+              delta rising well clear of that zone's noise), not a clock. Use
+              <em>Auto</em> to move on after 3 presses, or <em>Manual</em> to stay
+              until you click Next. You can jump to any zone from the strip to
+              redo it.</li>
+            <li><strong>Results</strong> &mdash; the suggested threshold per zone.
+              A zone marked <em>risky</em> has noise almost as strong as its
+              press: its threshold is a best effort, watch that one. Skipped zones
+              keep their current value. The recommended global settings (debounce,
+              averaging, hysteresis) are editable here.</li>
+            <li><strong>Verify</strong> &mdash; a full minute, hands off again.
+              15&nbsp;s was enough for a first guess; a minute catches the rare
+              spike. It then flags any zone the noise would <strong>falsely
+              trigger</strong> (raise it) and any zone sitting needlessly high
+              (safe to lower). Tick the ones you want and apply.</li>
+            <li><strong>Profile</strong> &mdash; stores the whole thing as a
+              profile you can re-apply later.</li>
+          </ol>
+          <p class="info-warn">Applying sends the values to the board
+            <em>live</em>. They are only permanent after <strong>Save to
+            flash</strong>.</p>
+        </article>
+
+        <article data-topic="livecal">
+          <h2>Live Calibration</h2>
+          <p><strong>In one line:</strong> it watches you actually play and
+            finds the zones whose threshold is set <em>too high</em>.</p>
+          <p>Auto Calibration measures a firm, deliberate press. In a real song
+            you tap fast and light, so a zone can reach 80&nbsp;% of its
+            calibrated peak and be missed. Those are <strong>near-misses</strong>:
+            a clear gesture that never triggered.</p>
+          <pre class="info-diagram">threshold  50  ------------------------
+press A    72  ####################     -&gt; hit (counted)
+press B    46  #############            -&gt; NEAR-MISS: you meant it, nothing happened
+noise       7  #                        -&gt; ignored, too small and too brief</pre>
+          <h3>How it tells a real gesture from noise</h3>
+          <p>For each zone it follows the resting noise level, then watches every
+            &laquo;&nbsp;bump&nbsp;&raquo; that rises clearly above it and lasts
+            more than a frame or two. Noise is small and brief; a finger is big
+            and lasts. Slides work naturally too &mdash; each zone follows its own
+            bump, overlaps included.</p>
+          <p>Each bump is then classified against the firmware's <em>own</em>
+            decision: <strong>hit</strong> (it triggered), <strong>tight</strong>
+            (it triggered, but only just), <strong>near-miss</strong> (clear
+            gesture, no trigger).</p>
+          <h3>Using it</h3>
+          <ol class="info-steps">
+            <li><strong>Start</strong>, then play a song normally. Pause and
+              resume freely; the table updates a couple of times a second.</li>
+            <li><strong>Stop &amp; review</strong> &mdash; zones with repeated
+              near-misses get a suggested <em>lower</em> threshold, placed just
+              under the strongest missed gesture (never below the noise).</li>
+            <li>Accept them one by one or all at once, then <strong>Save to
+              flash</strong>.</li>
+          </ol>
+          <p><strong>Auto-apply</strong> (off by default) lowers a zone live, in
+            the middle of play, once it has missed repeatedly and gone quiet for
+            ~10&nbsp;s. Handy, but you are tuning blind &mdash; leave it off until
+            you trust the numbers.</p>
+          <p class="info-warn">A tap that <em>passed</em> the threshold and still
+            did not trigger was blocked by <strong>debounce</strong>, not by the
+            threshold. It is shown as a near-miss for information, but lowering
+            the threshold would not help &mdash; lower <em>debounce on</em>
+            instead.</p>
+        </article>
+
+        <article data-topic="logs">
+          <h2>Logs</h2>
+          <p><strong>In one line:</strong> a black box that keeps recording, so
+            you can catch the rare glitch you cannot sit and wait for.</p>
+          <p>Recording runs continuously while the board is connected. Per zone it
+            keeps three numbers:</p>
+          <ul class="info-steps">
+            <li><strong>Peak</strong> &mdash; the strongest delta ever seen. Your
+              presses live here.</li>
+            <li><strong>Noise</strong> &mdash; the highest delta reached
+              <em>while the zone was not active</em>. This is the number a
+              threshold must clear.</li>
+            <li><strong>Triggers</strong> &mdash; how many times the zone fired.
+              Left alone on a quiet panel, this should stay at <strong>0</strong>;
+              anything else is a phantom trigger.</li>
+          </ul>
+          <p>Samples are kept in a rolling window (the oldest are dropped), and
+            can be <strong>exported as CSV or JSON</strong> to study offline &mdash;
+            that is how the noisy zones of this cabinet were first mapped.</p>
+          <p><strong>Typical use:</strong> leave the cabinet alone for a few
+            minutes, come back, and read the Triggers column. Any zone above zero
+            needs a higher threshold (or more debounce).</p>
+        </article>
+
+        <article data-topic="profiles">
+          <h2>Profiles &amp; saving</h2>
+          <h3>Two very different &laquo;&nbsp;saves&nbsp;&raquo;</h3>
+          <p>Every change you make is applied to the board <strong>immediately</strong>,
+            but lives only in its memory. Two separate things decide what
+            survives:</p>
+          <ul class="info-steps">
+            <li><strong>Save to flash</strong> &mdash; writes the current settings
+              into the board itself, so it boots on them. The orange banner is
+              there to remind you something is not saved yet.</li>
+            <li><strong>Profiles</strong> &mdash; named snapshots kept
+              <em>in this browser</em>, so you can juggle several setups (a
+              cautious one, an aggressive one, one per panel) and switch back.</li>
+          </ul>
+          <p class="info-warn">Applying a profile sends it to the board but does
+            <strong>not</strong> make it permanent &mdash; you still need
+            <em>Save to flash</em>.</p>
+          <p>Because nothing is written until you ask, the fastest way to undo a
+            bad experiment is simply to <strong>unplug the board</strong>: it
+            comes back on its last saved settings.</p>
+          <p>Profiles are also how <em>Auto Calibration</em> hands you its result:
+            it builds one rather than overwriting your setup behind your back.</p>
         </article>
 
         <article data-topic="connection">
@@ -373,6 +543,10 @@
               <button type="button" id="live-thr-save" class="icon-btn"
                       title="Save this threshold to the zone" aria-label="Save threshold">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              </button>
+              <button type="button" id="live-thr-reset" class="icon-btn icon-ghost" hidden
+                      title="Discard and reset to the board value" aria-label="Reset threshold">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
               </button>
             </div>
           </div>

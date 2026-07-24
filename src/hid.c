@@ -125,6 +125,10 @@ typedef struct __attribute__((packed)) {
 
 void hid_proc(const uint8_t *buffer, uint8_t len)
 {
+    // report_id + cmd at minimum; the 0x41 case below reads up to offset 9.
+    if (len < 2) {
+        return;
+    }
     hid_output_t *data = (hid_output_t *)buffer;
     if (data->report_id == REPORT_ID_OUTPUT) {
         switch (data->cmd) {
@@ -145,7 +149,7 @@ void hid_proc(const uint8_t *buffer, uint8_t len)
                 // Bit 15: Camera Ring
                 break;
             case 0x41: // RGB Light
-                if (data->led != 0xfc) {
+                if ((len < 10) || (data->led != 0xfc)) {
                     break;
                 }
                 uint32_t p1_banner = rgb32(data->r1, data->g1, data->b1, false);

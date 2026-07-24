@@ -30,8 +30,6 @@ bool touch_touched(unsigned key);
 uint64_t touch_touchmap();
 void touch_set_map(unsigned sensor, unsigned key);
 
-const uint16_t *touch_raw();
-const uint16_t *map_raw_to_zones(const uint16_t *raw);
 bool touch_sensor_ok(unsigned i);
 
 /* Live processing state, indexed by physical electrode (0..35). */

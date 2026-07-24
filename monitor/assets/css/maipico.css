@@ -181,6 +181,13 @@
 }
 .icon-btn:hover { filter: brightness(1.1); }
 .icon-btn svg { width: 17px; height: 17px; }
+/* Neutral variant for the reset action. */
+.icon-btn.icon-ghost {
+  background: var(--well);
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+.icon-btn.icon-ghost:hover { border-color: var(--accent); color: var(--accent); filter: none; }
 
 .spark {
   width: 100%;
@@ -462,7 +469,6 @@ h2 .opt-info { margin-left: 6px; vertical-align: middle; }
   color: var(--accent);
   cursor: grabbing;
 }
-.led-chip.drop-ready { cursor: grab; }
 .led-order:has(.dragging) { outline: 1px dashed var(--line); outline-offset: 6px; border-radius: 8px; }
 
 /* Labelled selector rows (AIME): a name on the left, its buttons on the right. */

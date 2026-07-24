@@ -59,13 +59,11 @@ uint8_t rgb_button_led_default(unsigned index)
     return button_led_def[index];
 }
 
-#define _MAP_LED(x) _MAKE_MAPPER(x)
-#define _MAKE_MAPPER(x) MAP_LED_##x
-#define MAP_LED_RGB { c1 = r; c2 = g; c3 = b; }
-#define MAP_LED_GRB { c1 = g; c2 = r; c3 = b; }
-
-#define REMAP_BUTTON_RGB _MAP_LED(BUTTON_RGB_ORDER)
-#define REMAP_TT_RGB _MAP_LED(TT_RGB_ORDER)
+/* Colour-order tokens for the RGB_ORDER setting in board_defs.h. Before these
+   were defined, the #if below compared two undefined macros (0 == 0) and the
+   GRB branch was always taken - correct for GRB strips, but by accident. */
+#define RGB 1
+#define GRB 2
 
 static inline uint32_t _rgb32(uint32_t c1, uint32_t c2, uint32_t c3, bool gamma_fix)
 {
@@ -80,7 +78,7 @@ static inline uint32_t _rgb32(uint32_t c1, uint32_t c2, uint32_t c3, bool gamma_
 
 uint32_t rgb32(uint32_t r, uint32_t g, uint32_t b, bool gamma_fix)
 {
-#if BUTTON_RGB_ORDER == GRB
+#if RGB_ORDER == GRB
     return _rgb32(g, r, b, gamma_fix);
 #else
     return _rgb32(r, g, b, gamma_fix);
@@ -203,6 +201,11 @@ static void fade_ctrl()
     last = now;
 }
 
+/* Known compromise: this can run on core0 (game LED commands, HID) while core1
+ * runs fade_ctrl/drive_led without the io lock. The multi-field write is not
+ * atomic, so a concurrent fade tick may briefly mix old and new values - one
+ * frame of a slightly wrong colour at worst, invisible in practice. Taking the
+ * mutex here would stall the game-facing path for a cosmetic gain. */
 static void set_color(unsigned index, uint32_t color, uint8_t speed)
 {
     if (index >= count_of(fade_ctx)) {
