@@ -10,6 +10,14 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 const CX = 210;
 const CY = 210;
 
+// Restore the sidebar collapsed state before first paint, so a collapsed rail
+// does not flash to full width on load. This script runs at end of body, so the
+// class lands before the browser paints.
+const SIDEBAR_COLLAPSED_KEY = 'maipico-sidebar-collapsed';
+if (localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1') {
+  document.body.classList.add('sidebar-collapsed');
+}
+
 // Card bars auto-scale to the deltas actually seen. Real-world deltas (through
 // wires, ITO and glass) are far smaller than direct-on-sensor tests, so a fixed
 // 1023 scale would barely move. barScale eases toward the recent peak, with a
@@ -78,6 +86,9 @@ const els = {
   liveDisc: document.getElementById('live-disc'),
   spark: document.getElementById('spark'),
   sparkLabel: document.getElementById('spark-label'),
+  liveThr: document.getElementById('live-thr'),
+  liveThrInput: document.getElementById('live-thr-input'),
+  liveThrSave: document.getElementById('live-thr-save'),
   sparkAll: document.getElementById('spark-all'),
   sparkAllLegend: document.getElementById('spark-all-legend'),
   viewZone: document.getElementById('view-zone'),
@@ -153,7 +164,29 @@ const els = {
   logSessionJson: document.getElementById('log-session-json'),
 };
 
-const needsConfig = document.querySelectorAll('.needs-config');
+// Single "connect the board" gate that stands in for every board-driven tab
+// until a configuration is received. Information stays reachable throughout.
+const connectGate = document.getElementById('connect-gate');
+
+// Reflect the connection state across the whole shell: lock every tab but
+// Information, and swap the active board-driven section for the shared gate.
+// The connection signal is the same one the old notices used: config !== null.
+function updateConnectGate() {
+  const connected = config !== null;
+  document.body.classList.toggle('not-connected', !connected);
+  document.querySelectorAll('.nav button').forEach((button) => {
+    if (button.dataset.section === 'info') return;
+    button.classList.toggle('locked', !connected);
+  });
+  const activeButton = document.querySelector('.nav button.active');
+  const activeSection = activeButton ? activeButton.dataset.section : 'info';
+  const showGate = !connected && activeSection !== 'info';
+  connectGate.hidden = !showGate;
+  document.querySelectorAll('.section').forEach((section) => {
+    section.classList.toggle('gated',
+      showGate && section.dataset.section === activeSection);
+  });
+}
 
 // --- Small helpers ---------------------------------------------------------
 
@@ -404,6 +437,54 @@ function updateSparkLabel() {
   els.sparkLabel.textContent = target.electrode >= 0
     ? `Tracing ${target.name} - electrode ${target.electrode} (${sensorChannel(target.electrode)}), zone ${zoneName}`
     : `${target.name} has no electrode assigned.`;
+  updateLiveThr();
+}
+
+// The zone index behind the current trace (a zone directly, or the zone an
+// electrode is mapped to), or -1 when the trace has no editable zone.
+function tracedZone() {
+  if (!liveSelection || !config) return -1;
+  if (liveSelection.kind === 'zone') return liveSelection.index;
+  const z = config.map[liveSelection.index];
+  return z === UNMAPPED ? -1 : z;
+}
+
+// Inline threshold editor next to the Trace title: it mirrors the traced zone's
+// threshold and only writes it on the Save button (never on keystroke). The
+// value is refreshed from the board except while the field is being edited.
+function updateLiveThr() {
+  const z = tracedZone();
+  const show = z >= 0 && Boolean(config);
+  els.liveThr.hidden = !show;
+  // Never overwrite while the field has focus, or the per-frame refresh fights
+  // the user's typing. activeElement is authoritative, unlike the shared guard.
+  if (show && document.activeElement !== els.liveThrInput) {
+    els.liveThrInput.value = config.thr[z];
+  }
+}
+
+function saveLiveThr() {
+  const z = tracedZone();
+  if (z < 0 || !config) return;
+  let v = Math.round(Number(els.liveThrInput.value));
+  if (!Number.isFinite(v)) return;
+  v = Math.min(1000, Math.max(1, v));
+  els.liveThrInput.value = v;
+  send(`thr ${zones[z]} ${v}`);
+  config.thr[z] = v;   // optimistic: avoid a flicker back to the old value until C is republished
+  editing = null;
+  notify(`Threshold ${zones[z]} = ${v}`);
+}
+
+function initLiveThr() {
+  els.liveThrInput.addEventListener('focus', () => { editing = els.liveThrInput; });
+  els.liveThrInput.addEventListener('blur', () => {
+    if (editing === els.liveThrInput) editing = null;
+  });
+  els.liveThrInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') { event.preventDefault(); saveLiveThr(); }
+  });
+  els.liveThrSave.addEventListener('click', saveLiveThr);
 }
 
 function drawSpark() {
@@ -447,11 +528,32 @@ function drawSpark() {
     });
     ctx.stroke();
   }
+
+  drawYMax(ctx, w, h, scale);
 }
 
 // One distinct hue per zone, shared by the global trace and its legend.
 function zoneColor(z) {
   return `hsl(${Math.round((z / N_Z) * 360)}, 70%, 60%)`;
+}
+
+// Label the vertical axis top (auto-scaled max) and bottom (0), so a glance
+// tells whether the biggest peak is ~50 or ~800.
+function drawYMax(ctx, w, h, scale) {
+  ctx.font = 'bold 11px system-ui, sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  // White text on a dark chip, so it stays readable over the coloured lines.
+  const chip = (text, y) => {
+    const tw = ctx.measureText(text).width;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+    ctx.fillRect(3, y - 1, tw + 8, 15);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(text, 7, y + 1);
+  };
+  chip(`max ${Math.round(scale)}`, 3);
+  chip('0', h - 15);
+  ctx.textBaseline = 'alphabetic';
 }
 
 // Global trace: every zone's delta at once, on a shared auto-scaled axis.
@@ -485,6 +587,8 @@ function drawGlobalSpark() {
     });
     ctx.stroke();
   }
+
+  drawYMax(ctx, w, h, scale);
 }
 
 function buildGlobalLegend() {
@@ -1892,7 +1996,7 @@ const logStats = Array.from({ length: N_Z }, () => ({
 const logPrevActive = new Array(N_Z).fill(false);
 const logRows = [];   // per-zone cell refs, index = zone position
 
-const recording = { active: false, startedAt: 0, startIso: '', samples: [] };
+const recording = { startedAt: 0, startIso: '', samples: [] };
 let logLastRender = 0;
 
 function buildLogTable() {
@@ -1937,7 +2041,7 @@ function logFrame(data) {
     logPrevActive[z] = active;
   }
 
-  if (recording.active) recordSample(data);
+  if (config) recordSample(data);   // always record while connected (rolling)
 
   const now = performance.now();
   if (now - logLastRender >= LOG_RENDER_MS) {
@@ -1948,6 +2052,10 @@ function logFrame(data) {
 }
 
 function recordSample(data) {
+  if (!recording.samples.length) {
+    recording.startedAt = performance.now();
+    recording.startIso = new Date().toISOString();
+  }
   const deltas = new Array(N_Z);
   const active = new Array(N_Z);
   for (let z = 0; z < N_Z; z += 1) {
@@ -1960,10 +2068,8 @@ function recordSample(data) {
     deltas,
     active,
   });
-  if (recording.samples.length >= LOG_MAX_SAMPLES) {
-    stopRecording();
-    notify('Recording full - stopped at the maximum sample count', 'warn');
-  }
+  // Rolling window: drop the oldest sample once past the cap.
+  if (recording.samples.length > LOG_MAX_SAMPLES) recording.samples.shift();
 }
 
 function renderLogStats() {
@@ -1987,46 +2093,22 @@ function resetLogStats() {
   notify('Live stats reset');
 }
 
-function updateRecordUi() {
-  els.logRecord.textContent = recording.active ? 'Stop' : 'Record';
-  els.logRecord.classList.toggle('recording', recording.active);
-  els.logRecord.classList.toggle('primary', !recording.active);
-  els.logRecState.textContent = recording.active ? 'recording' : 'stopped';
-}
-
 function updateRecordStatus() {
-  els.logRecCount.textContent = recording.samples.length;
-  let ms = 0;
-  if (recording.active) ms = performance.now() - recording.startedAt;
-  else if (recording.samples.length) ms = recording.samples[recording.samples.length - 1].t;
+  const n = recording.samples.length;
+  els.logRecCount.textContent = n;
+  const ms = n > 1 ? recording.samples[n - 1].t - recording.samples[0].t : 0;
   els.logRecDuration.textContent = `${(ms / 1000).toFixed(1)} s`;
+  els.logRecState.textContent = config ? 'recording' : 'waiting for board';
 }
 
-function startRecording() {
-  recording.active = true;
+// The session log records continuously while connected (rolling window); Clear
+// starts a fresh window.
+function clearLog() {
+  recording.samples = [];
   recording.startedAt = performance.now();
   recording.startIso = new Date().toISOString();
-  recording.samples = [];
-  updateRecordUi();
   updateRecordStatus();
-  notify('Recording started');
-}
-
-function stopRecording() {
-  if (!recording.active) return;
-  recording.active = false;
-  updateRecordUi();
-  updateRecordStatus();
-}
-
-function toggleRecording() {
-  if (!config) { notify('Connect the board before recording', 'warn'); return; }
-  if (recording.active) {
-    stopRecording();
-    notify('Recording stopped');
-  } else {
-    startRecording();
-  }
+  notify('Session log cleared');
 }
 
 // A timestamped, filename-safe name for an exported file.
@@ -2096,9 +2178,996 @@ function exportStatsJson() {
 els.logReset.addEventListener('click', resetLogStats);
 els.logStatsCsv.addEventListener('click', exportStatsCsv);
 els.logStatsJson.addEventListener('click', exportStatsJson);
-els.logRecord.addEventListener('click', toggleRecording);
+els.logRecord.addEventListener('click', clearLog);
 els.logSessionCsv.addEventListener('click', exportSessionCsv);
 els.logSessionJson.addEventListener('click', exportSessionJson);
+
+// --- Auto-calibration wizard -----------------------------------------------
+
+// A guided pass that measures, per zone, the standby noise floor and the peak
+// of a real press, then derives a threshold sitting above the noise and below
+// the press. The outcome is a profile (reusing the profile store/apply code) -
+// nothing is written to flash on its own. All measurement is driven from the
+// render pipeline (calibFrame), active only while a measurement phase runs.
+
+const CALIB_NOISE_MS = 15000;    // standby noise window (untouched)
+const CALIB_PRESS_TARGET = 3;    // prolonged presses that confirm a zone (auto)
+const CALIB_PRESS_HOLD = 5;      // frames a press must hold above the level (~200 ms)
+const CALIB_PRESS_MARGIN = 8;    // floor of the detection margin over noise
+const CALIB_MIN_MARGIN = 6;      // floor of the threshold margin over noise
+const CALIB_RISKY_GAP = 12;      // press within this of noise -> "risky"
+const CALIB_RISKY_MARGIN = 8;    // best-effort margin for a risky zone
+
+// Step 4 (standby verify): a longer, more trustworthy noise watch that checks
+// the step-3 thresholds against real resting noise.
+const CALIB_VERIFY_MS = 60000;   // standby verify window
+const VERIFY_RAISE_MARGIN = 8;   // put a flagged threshold this far over noise
+const VERIFY_LOWER_MIN_GAP = 6;  // only suggest lowering if it drops by this much
+
+// Recommended global parameters seeded into step 3 (editable there). Debounce
+// is the main anti-spike lever; the rest is a sane starting point.
+const CALIB_PARAM_DEFAULTS = { debounceOn: 3, debounceOff: 3, avg: 2, hyst: 25 };
+
+const calib = {
+  phase: 'idle',        // 'idle' | 'noise' | 'press' | 'results'
+  noiseCeil: new Array(N_Z).fill(0),
+  noiseP95: new Array(N_Z).fill(0),
+  noiseSamples: Array.from({ length: N_Z }, () => []),
+  pressPeak: new Array(N_Z).fill(null),   // null = zone not measured
+  threshold: new Array(N_Z).fill(0),
+  status: new Array(N_Z).fill('kept'),    // 'ok' | 'risky' | 'kept'
+  noiseEndsAt: 0,
+  pressOrder: [],       // mapped zone indices, in A1..E8 order
+  pressState: new Array(N_Z).fill('pending'),  // 'pending'|'measured'|'skipped'
+  pressChips: [],       // one selectable chip per mapped zone
+  pressPos: 0,          // position in pressOrder of the targeted zone
+  pressZone: -1,        // targeted zone index
+  pressMax: 0,          // strongest delta in the current session
+  pressCount: 0,        // completed prolonged presses this session
+  pressHeld: 0,         // frames held above the detection level
+  pressInPress: false,  // a hold has been confirmed, awaiting release
+  advanceMode: 'auto',  // 'auto' | 'manual'
+  paramInputs: {},      // editable param fields, built once
+  verifyCeil: new Array(N_Z).fill(0),   // noise ceiling over the verify window
+  verifyTrig: new Array(N_Z).fill(0),   // times noise reached the candidate thr
+  verifyEndsAt: 0,
+  verifyAdjust: [],     // pending {zone,current,suggested,dir,reason}
+};
+
+// Calibration DOM, kept local so the shared els object stays focused.
+const cel = {
+  steps: document.getElementById('calib-steps'),
+  rebase: document.getElementById('calib-rebase'),
+  noiseStart: document.getElementById('calib-noise-start'),
+  noiseProgress: document.getElementById('calib-noise-progress'),
+  noiseBar: document.getElementById('calib-noise-bar'),
+  noiseCount: document.getElementById('calib-noise-count'),
+  pressInstr: document.getElementById('calib-press-instr'),
+  advAuto: document.getElementById('calib-adv-auto'),
+  advManual: document.getElementById('calib-adv-manual'),
+  advHint: document.getElementById('calib-advance-hint'),
+  pressZone: document.getElementById('calib-press-zone'),
+  pressMax: document.getElementById('calib-press-max'),
+  pressCount: document.getElementById('calib-press-count'),
+  pressProgress: document.getElementById('calib-press-progress'),
+  zoneStrip: document.getElementById('calib-zone-strip'),
+  pressBar: document.getElementById('calib-press-bar'),
+  pressPrev: document.getElementById('calib-press-prev'),
+  pressNext: document.getElementById('calib-press-next'),
+  pressSkip: document.getElementById('calib-press-skip'),
+  pressFinish: document.getElementById('calib-press-finish'),
+  stop: document.getElementById('calib-stop'),
+  resultRows: document.getElementById('calib-result-rows'),
+  params: document.getElementById('calib-params'),
+  toVerify: document.getElementById('calib-to-verify'),
+  toProfile: document.getElementById('calib-to-profile'),
+  verifyStart: document.getElementById('calib-verify-start'),
+  verifySkip: document.getElementById('calib-verify-skip'),
+  verifyProgress: document.getElementById('calib-verify-progress'),
+  verifyBar: document.getElementById('calib-verify-bar'),
+  verifyCount: document.getElementById('calib-verify-count'),
+  verifyResults: document.getElementById('calib-verify-results'),
+  verifySummary: document.getElementById('calib-verify-summary'),
+  verifyRows: document.getElementById('calib-verify-rows'),
+  verifyApply: document.getElementById('calib-verify-apply'),
+  verifyToProfile: document.getElementById('calib-verify-to-profile'),
+  profileForm: document.getElementById('calib-profile-form'),
+  profileName: document.getElementById('calib-profile-name'),
+  applyNow: document.getElementById('calib-apply-now'),
+};
+
+const clampThr = (v) => Math.min(1000, Math.max(1, Math.round(v)));
+
+// Approximate percentile from a sample array (sort once, nearest-rank).
+function calibPercentile(samples, p) {
+  if (!samples.length) return 0;
+  const sorted = [...samples].sort((a, b) => a - b);
+  const idx = Math.min(sorted.length - 1, Math.floor(p * (sorted.length - 1)));
+  return sorted[idx];
+}
+
+// Show one wizard step, hide the rest, and light its marker in the step list.
+function calibShowStep(step) {
+  document.querySelectorAll('.calib-step').forEach((el) => {
+    el.hidden = Number(el.dataset.step) !== step;
+  });
+  cel.steps.querySelectorAll('li').forEach((li) => {
+    const n = Number(li.dataset.step);
+    li.classList.toggle('active', n === step);
+    li.classList.toggle('done', n < step);
+  });
+}
+
+// Clear every measurement and return to the idle first step.
+function calibReset() {
+  calib.phase = 'idle';
+  calib.noiseCeil.fill(0);
+  calib.noiseP95.fill(0);
+  calib.noiseSamples.forEach((arr) => { arr.length = 0; });
+  calib.pressPeak.fill(null);
+  calib.threshold.fill(0);
+  calib.status.fill('kept');
+  calib.pressState.fill('pending');
+  calib.pressOrder = [];
+  calib.pressChips = [];
+  calib.pressPos = 0;
+  calib.pressZone = -1;
+  calib.pressMax = 0;
+  calib.pressCount = 0;
+  calib.pressHeld = 0;
+  calib.pressInPress = false;
+  calib.verifyCeil.fill(0);
+  calib.verifyTrig.fill(0);
+  calib.verifyAdjust = [];
+  cel.zoneStrip.textContent = '';
+  cel.noiseProgress.hidden = true;
+  cel.noiseStart.disabled = false;
+  cel.verifyProgress.hidden = true;
+  cel.verifyResults.hidden = true;
+  cel.verifyStart.disabled = false;
+  setHoldProgress(cel.noiseBar, 0);
+  setHoldProgress(cel.verifyBar, 0);
+  calibSetAdvance('auto');
+  calibShowStep(1);
+}
+
+function calibStop() {
+  const wasMeasuring = calib.phase === 'noise' || calib.phase === 'press'
+    || calib.phase === 'verify';
+  calibReset();
+  if (wasMeasuring) notify('Calibration stopped, measurements discarded', 'warn');
+}
+
+// --- Step 1: noise ---------------------------------------------------------
+
+function calibStartNoise() {
+  if (!config) { notify('Connect the board before calibrating', 'warn'); return; }
+  calibReset();
+  calib.phase = 'noise';
+  calib.noiseEndsAt = performance.now() + CALIB_NOISE_MS;
+  cel.noiseProgress.hidden = false;
+  cel.noiseStart.disabled = true;
+  cel.noiseCount.textContent = `${(CALIB_NOISE_MS / 1000).toFixed(0)} s left - do not touch the panel`;
+  setHoldProgress(cel.noiseBar, 0);
+}
+
+function calibNoiseFrame(data) {
+  for (let z = 0; z < N_Z; z += 1) {
+    const e = zoneToElectrode[z];
+    if (e < 0 || data.zonesActive[z]) continue;   // only untouched zones
+    const delta = data.deltas[e];
+    if (delta > calib.noiseCeil[z]) calib.noiseCeil[z] = delta;
+    calib.noiseSamples[z].push(delta);
+  }
+  const now = performance.now();
+  const remaining = Math.max(0, calib.noiseEndsAt - now);
+  setHoldProgress(cel.noiseBar, 1 - remaining / CALIB_NOISE_MS);
+  cel.noiseCount.textContent = `${Math.ceil(remaining / 1000)} s left - do not touch the panel`;
+  if (now >= calib.noiseEndsAt) calibFinishNoise();
+}
+
+function calibFinishNoise() {
+  for (let z = 0; z < N_Z; z += 1) {
+    calib.noiseP95[z] = calibPercentile(calib.noiseSamples[z], 0.95);
+    calib.noiseSamples[z].length = 0;   // free the samples, ceilings are kept
+  }
+  cel.noiseProgress.hidden = true;
+  calibStartPress();
+}
+
+// --- Step 2: press force per zone (user-paced, navigable) ------------------
+
+// Advance mode: Auto moves on once CALIB_PRESS_TARGET presses are counted;
+// Manual never advances on its own. Both keep Previous / Next / Skip / Finish.
+function calibSetAdvance(mode) {
+  calib.advanceMode = mode;
+  cel.advAuto.classList.toggle('on', mode === 'auto');
+  cel.advManual.classList.toggle('on', mode === 'manual');
+  cel.advHint.textContent = mode === 'auto'
+    ? `Auto: moves on after ${CALIB_PRESS_TARGET} presses.`
+    : 'Manual: stays on the zone; use Next when done.';
+}
+
+function calibStartPress() {
+  calib.pressOrder = [];
+  for (let z = 0; z < N_Z; z += 1) {
+    if (zoneToElectrode[z] >= 0) calib.pressOrder.push(z);
+  }
+  if (!calib.pressOrder.length) {
+    notify('No mapped zones to measure - map zones first', 'warn');
+    calibReset();
+    return;
+  }
+  calib.phase = 'press';
+  calib.pressState.fill('pending');
+  calib.pressPeak.fill(null);
+  calibShowStep(2);
+  calibBuildZoneStrip();
+  calibGoTo(0);
+}
+
+// One clickable chip per mapped zone, so any zone can be revisited later.
+function calibBuildZoneStrip() {
+  cel.zoneStrip.textContent = '';
+  calib.pressChips = [];
+  calib.pressOrder.forEach((z, pos) => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'calib-chip';
+    chip.textContent = zones[z];
+    chip.addEventListener('click', () => calibJumpTo(pos));
+    cel.zoneStrip.appendChild(chip);
+    calib.pressChips.push(chip);
+  });
+}
+
+// Reflect each zone's status; the targeted zone is always shown as current.
+function calibRenderZoneStrip() {
+  calib.pressOrder.forEach((z, pos) => {
+    const chip = calib.pressChips[pos];
+    if (!chip) return;
+    const state = pos === calib.pressPos ? 'current' : calib.pressState[z];
+    chip.className = `calib-chip calib-chip-${state}`;
+  });
+}
+
+// Clear the live session on the targeted zone, ready for a fresh measurement.
+function calibResetZoneSession() {
+  calib.pressMax = 0;
+  calib.pressCount = 0;
+  calib.pressHeld = 0;
+  calib.pressInPress = false;
+  cel.pressMax.textContent = '0';
+  cel.pressCount.textContent = `0 / ${CALIB_PRESS_TARGET}`;
+  setHoldProgress(cel.pressBar, 0);
+}
+
+// Target a zone by position: starts a clean session on it and updates the UI.
+function calibGoTo(pos) {
+  calib.pressPos = pos;
+  calib.pressZone = calib.pressOrder[pos];
+  calibResetZoneSession();
+  cel.pressZone.textContent = zones[calib.pressZone];
+  cel.pressProgress.textContent = `Zone ${pos + 1} of ${calib.pressOrder.length}`;
+  cel.pressInstr.textContent =
+    `Press and release ${zones[calib.pressZone]} firmly, at your own pace.`;
+  cel.pressPrev.disabled = pos === 0;
+  calibRenderZoneStrip();
+}
+
+// Commit the current session's peak, but only when a press actually happened,
+// so backing out of a zone never wipes an earlier measurement with a zero.
+function calibRecordPress() {
+  if (calib.pressMax > 0) {
+    calib.pressPeak[calib.pressZone] = calib.pressMax;
+    calib.pressState[calib.pressZone] = 'measured';
+  }
+}
+
+// Jump to a zone from the strip. Clicking the current zone restarts its
+// measurement; clicking another commits the current one first.
+function calibJumpTo(pos) {
+  if (calib.phase !== 'press') return;
+  if (pos === calib.pressPos) { calibResetZoneSession(); return; }
+  calibRecordPress();
+  calibGoTo(pos);
+}
+
+// Move to the next zone, or finish once the last one is committed.
+function calibAdvance() {
+  if (calib.pressPos >= calib.pressOrder.length - 1) { calibFinishPress(); return; }
+  calibGoTo(calib.pressPos + 1);
+}
+
+function calibPressFrame(data) {
+  const z = calib.pressZone;
+  const e = zoneToElectrode[z];
+  if (e < 0) return;
+  const delta = data.deltas[e];
+  if (delta > calib.pressMax) {
+    calib.pressMax = delta;
+    cel.pressMax.textContent = delta;
+  }
+  // Prolonged-press detection, independent of the current threshold: the delta
+  // rises a clear margin above the zone's measured noise, holds CALIB_PRESS_HOLD
+  // frames, then falls back below the level -> one counted press.
+  const level = calib.noiseCeil[z]
+    + Math.max(CALIB_PRESS_MARGIN, Math.round(0.5 * calib.noiseCeil[z]));
+  if (delta >= level) {
+    calib.pressHeld += 1;
+    if (calib.pressHeld >= CALIB_PRESS_HOLD) calib.pressInPress = true;
+  } else {
+    if (calib.pressInPress) {
+      calib.pressCount += 1;
+      cel.pressCount.textContent = `${calib.pressCount} / ${CALIB_PRESS_TARGET}`;
+      setHoldProgress(cel.pressBar, calib.pressCount / CALIB_PRESS_TARGET);
+      if (calib.advanceMode === 'auto' && calib.pressCount >= CALIB_PRESS_TARGET) {
+        calibRecordPress();
+        calibAdvance();
+        return;
+      }
+    }
+    calib.pressHeld = 0;
+    calib.pressInPress = false;
+  }
+}
+
+function calibFinishPress() {
+  calib.phase = 'results';
+  calibComputeAll();
+  calibBuildResults();
+  calibShowStep(3);
+}
+
+// --- Step 3: compute + review ----------------------------------------------
+
+function calibComputeAll() {
+  for (let z = 0; z < N_Z; z += 1) {
+    const e = zoneToElectrode[z];
+    const peak = calib.pressPeak[z];
+    if (e < 0 || peak === null) {
+      calib.status[z] = 'kept';
+      calib.threshold[z] = config ? config.thr[z] : 1;
+      continue;
+    }
+    const ceil = calib.noiseCeil[z];
+    const gap = peak - ceil;
+    if (gap < CALIB_RISKY_GAP) {
+      calib.status[z] = 'risky';
+      calib.threshold[z] = clampThr(ceil + CALIB_RISKY_MARGIN);
+    } else {
+      calib.status[z] = 'ok';
+      calib.threshold[z] = clampThr(ceil + Math.max(CALIB_MIN_MARGIN, 0.4 * gap));
+    }
+  }
+}
+
+const CALIB_STATUS_LABEL = { ok: 'ok', risky: 'risky', kept: 'kept (not measured)' };
+
+function calibBuildResults() {
+  cel.resultRows.textContent = '';
+  for (let z = 0; z < N_Z; z += 1) {
+    if (zoneToElectrode[z] < 0) continue;   // unmapped zones are not shown
+    const row = document.createElement('tr');
+    row.classList.add(calib.status[z]);
+
+    const name = document.createElement('td');
+    name.className = 'zone-name';
+    name.textContent = zones[z];
+
+    const noise = document.createElement('td');
+    noise.textContent = calib.noiseCeil[z];
+    noise.title = `95th percentile: ${calib.noiseP95[z]}`;
+
+    const peak = document.createElement('td');
+    peak.textContent = calib.pressPeak[z] === null ? '-' : calib.pressPeak[z];
+
+    const thr = document.createElement('td');
+    thr.textContent = calib.threshold[z];
+
+    const status = document.createElement('td');
+    status.textContent = CALIB_STATUS_LABEL[calib.status[z]];
+
+    row.append(name, noise, peak, thr, status);
+    cel.resultRows.appendChild(row);
+  }
+}
+
+function calibBuildParams() {
+  cel.params.textContent = '';
+  const defs = [
+    ['debounceOn', 'debounce on', 0, 15],
+    ['debounceOff', 'debounce off', 0, 15],
+    ['avg', 'avg', 1, 16],
+    ['hyst', 'hyst %', 0, 90],
+  ];
+  defs.forEach(([key, label, min, max]) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'proc-field';
+    const span = document.createElement('span');
+    span.textContent = label;
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.min = min;
+    input.max = max;
+    input.value = CALIB_PARAM_DEFAULTS[key];
+    wrap.append(span, input);
+    cel.params.appendChild(wrap);
+    calib.paramInputs[key] = input;
+  });
+}
+
+// Reset the editable parameters to the recommended defaults.
+function calibResetParams() {
+  Object.entries(CALIB_PARAM_DEFAULTS).forEach(([key, value]) => {
+    if (calib.paramInputs[key]) calib.paramInputs[key].value = value;
+  });
+}
+
+// --- Shared adjustment review (used by verify and live calibration) --------
+
+// Render a list of {zone,current,suggested,dir,reason} into a <tbody> as rows
+// with a per-zone checkbox (checked by default). Reused by the standby verify
+// and the live-calibration review so the accept / accept-all logic lives once.
+function buildAdjustmentReview(tbody, adjustments) {
+  tbody.textContent = '';
+  adjustments.forEach((adj) => {
+    const row = document.createElement('tr');
+    row.classList.add(`adjust-${adj.dir}`);
+
+    const pick = document.createElement('td');
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = true;
+    box.dataset.zone = String(adj.zone);
+    box.dataset.suggested = String(adj.suggested);
+    pick.appendChild(box);
+
+    const name = document.createElement('td');
+    name.className = 'zone-name';
+    name.textContent = zones[adj.zone];
+
+    const cur = document.createElement('td');
+    cur.textContent = adj.current;
+
+    const sug = document.createElement('td');
+    sug.textContent = adj.suggested;
+
+    const change = document.createElement('td');
+    const diff = adj.suggested - adj.current;
+    change.className = `adjust-change adjust-${adj.dir}`;
+    change.textContent = `${diff > 0 ? '+' : ''}${diff} (${adj.dir})`;
+
+    const reason = document.createElement('td');
+    reason.className = 'adjust-reason';
+    reason.textContent = adj.reason;
+
+    row.append(pick, name, cur, sug, change, reason);
+    tbody.appendChild(row);
+  });
+}
+
+// Read the checked rows back as [{zone, suggested}].
+function collectAcceptedAdjustments(tbody) {
+  const out = [];
+  tbody.querySelectorAll('input[type=checkbox]:checked').forEach((box) => {
+    out.push({ zone: Number(box.dataset.zone), suggested: Number(box.dataset.suggested) });
+  });
+  return out;
+}
+
+// Send accepted thresholds live to the board (leaves it unsaved on purpose).
+function applyAdjustmentsToBoard(accepted) {
+  if (!config) { notify('Connect the board first', 'warn'); return 0; }
+  accepted.forEach(({ zone, suggested }) => send(`thr ${zones[zone]} ${suggested}`));
+  return accepted.length;
+}
+
+// Wire the Accept all / Accept none buttons once (they target a tbody by id).
+function initAdjustmentToggles() {
+  document.querySelectorAll('.adjust-all').forEach((btn) => btn.addEventListener('click', () => {
+    document.querySelectorAll(`#${btn.dataset.target} input[type=checkbox]`)
+      .forEach((box) => { box.checked = true; });
+  }));
+  document.querySelectorAll('.adjust-none').forEach((btn) => btn.addEventListener('click', () => {
+    document.querySelectorAll(`#${btn.dataset.target} input[type=checkbox]`)
+      .forEach((box) => { box.checked = false; });
+  }));
+}
+
+// --- Step 4: verify thresholds against standby noise -----------------------
+
+function calibStartVerify() {
+  if (!config) { notify('Connect the board before verifying', 'warn'); return; }
+  calib.phase = 'verify';
+  calib.verifyCeil.fill(0);
+  calib.verifyTrig.fill(0);
+  calib.verifyAdjust = [];
+  calib.verifyEndsAt = performance.now() + CALIB_VERIFY_MS;
+  cel.verifyResults.hidden = true;
+  cel.verifyProgress.hidden = false;
+  cel.verifyStart.disabled = true;
+  setHoldProgress(cel.verifyBar, 0);
+  cel.verifyCount.textContent = `${(CALIB_VERIFY_MS / 1000).toFixed(0)} s left - do not touch the panel`;
+}
+
+function calibVerifyFrame(data) {
+  for (let z = 0; z < N_Z; z += 1) {
+    const e = zoneToElectrode[z];
+    if (e < 0 || data.zonesActive[z]) continue;   // only untouched zones
+    const delta = data.deltas[e];
+    if (delta > calib.verifyCeil[z]) calib.verifyCeil[z] = delta;
+    if (delta >= calib.threshold[z]) calib.verifyTrig[z] += 1;
+  }
+  const now = performance.now();
+  const remaining = Math.max(0, calib.verifyEndsAt - now);
+  setHoldProgress(cel.verifyBar, 1 - remaining / CALIB_VERIFY_MS);
+  cel.verifyCount.textContent = `${Math.ceil(remaining / 1000)} s left - do not touch the panel`;
+  if (now >= calib.verifyEndsAt) calibFinishVerify();
+}
+
+// Compare the verified noise to the step-3 thresholds and derive per-zone
+// raise/lower suggestions.
+function calibComputeVerify() {
+  const adjust = [];
+  for (let z = 0; z < N_Z; z += 1) {
+    if (zoneToElectrode[z] < 0) continue;
+    const cand = calib.threshold[z];
+    const ceil = calib.verifyCeil[z];
+    if (calib.verifyTrig[z] > 0 || ceil >= cand) {
+      // Noise reached the threshold -> it would fire on its own. Lift it clear.
+      const suggested = clampThr(ceil + VERIFY_RAISE_MARGIN);
+      if (suggested > cand) {
+        adjust.push({ zone: z, current: cand, suggested, dir: 'raise',
+          reason: `noise reached ${ceil} (${calib.verifyTrig[z]} hits)` });
+      }
+      continue;
+    }
+    // Headroom: the real resting noise sits well below the threshold. If a press
+    // peak is known, a threshold placed from this longer, truer noise floor may
+    // be meaningfully lower -> safe to drop.
+    const peak = calib.pressPeak[z];
+    if (peak === null) continue;
+    const ideal = clampThr(ceil + Math.max(CALIB_MIN_MARGIN, 0.4 * (peak - ceil)));
+    if (ideal <= cand - VERIFY_LOWER_MIN_GAP) {
+      adjust.push({ zone: z, current: cand, suggested: ideal, dir: 'lower',
+        reason: `noise only ${ceil}, room below ${cand}` });
+    }
+  }
+  return adjust;
+}
+
+function calibFinishVerify() {
+  calib.phase = 'results';   // measurement done; stay on step 4 showing results
+  cel.verifyProgress.hidden = true;
+  cel.verifyStart.disabled = false;
+  calib.verifyAdjust = calibComputeVerify();
+  buildAdjustmentReview(cel.verifyRows, calib.verifyAdjust);
+  const raises = calib.verifyAdjust.filter((a) => a.dir === 'raise').length;
+  const lowers = calib.verifyAdjust.filter((a) => a.dir === 'lower').length;
+  cel.verifySummary.textContent = calib.verifyAdjust.length === 0
+    ? 'No issues found - every threshold clears the resting noise with room to spare.'
+    : `${raises} zone(s) to raise (would fire on noise), ${lowers} to lower (extra headroom). Uncheck any you want to keep, then apply.`;
+  cel.verifyResults.hidden = false;
+}
+
+// Apply the accepted verify suggestions to the candidate thresholds (so they
+// flow into the profile) and push them live to the board.
+function calibApplyVerify() {
+  const accepted = collectAcceptedAdjustments(cel.verifyRows);
+  if (!accepted.length) { notify('Nothing selected to apply', 'warn'); return; }
+  accepted.forEach(({ zone, suggested }) => { calib.threshold[zone] = suggested; });
+  applyAdjustmentsToBoard(accepted);
+  calibBuildResults();   // reflect new thresholds in the step-3 table
+  notify(`Applied ${accepted.length} adjustment(s) - Save to flash to keep them`);
+  cel.verifyApply.disabled = true;
+}
+
+// --- Step 5: build + save the profile --------------------------------------
+
+function calibParamValue(key, min, max) {
+  const n = parseInt(calib.paramInputs[key].value, 10);
+  if (!Number.isInteger(n)) return CALIB_PARAM_DEFAULTS[key];
+  return Math.min(max, Math.max(min, n));
+}
+
+function calibCreateProfile() {
+  if (!config) { notify('Connect the board before creating a profile', 'warn'); return; }
+
+  const cfg = cloneConfig(config);
+  for (let z = 0; z < N_Z; z += 1) cfg.thr[z] = calib.threshold[z];
+  cfg.debounceOn = calibParamValue('debounceOn', 0, 15);
+  cfg.debounceOff = calibParamValue('debounceOff', 0, 15);
+  cfg.avg = calibParamValue('avg', 1, 16);
+  cfg.hyst = calibParamValue('hyst', 0, 90);
+
+  const name = cel.profileName.value.trim() || `Auto-cal ${new Date().toLocaleString()}`;
+  const list = loadProfiles();
+  const existing = list.findIndex((p) => p.name === name);
+  const profile = { name, savedAt: new Date().toISOString(), config: cfg };
+
+  if (existing >= 0) {
+    if (!window.confirm(`A profile named "${name}" already exists. Replace it?`)) return;
+    list[existing] = profile;
+  } else {
+    list.push(profile);
+  }
+  storeProfiles(list);
+  renderProfiles();
+  notify(`Profile "${name}" created from calibration`);
+
+  if (cel.applyNow.checked) applyProfile(profile);
+}
+
+// Called every frame from render(): advance whichever measurement is running.
+// A dropped link mid-measurement stops the wizard rather than freezing it.
+function calibFrame(data) {
+  if (calib.phase !== 'noise' && calib.phase !== 'press' && calib.phase !== 'verify') return;
+  if (!data.connected || !config) {
+    calibReset();
+    notify('Board disconnected - calibration stopped', 'warn');
+    return;
+  }
+  if (calib.phase === 'noise') calibNoiseFrame(data);
+  else if (calib.phase === 'press') calibPressFrame(data);
+  else if (calib.phase === 'verify') calibVerifyFrame(data);
+}
+
+function calibInit() {
+  calibBuildParams();
+  calibReset();
+
+  cel.rebase.addEventListener('click', () => {
+    if (!config) { notify('Connect the board first', 'warn'); return; }
+    send('rebase');
+    notify('Idle level set from the current readings');
+  });
+  cel.noiseStart.addEventListener('click', calibStartNoise);
+  cel.advAuto.addEventListener('click', () => calibSetAdvance('auto'));
+  cel.advManual.addEventListener('click', () => calibSetAdvance('manual'));
+  cel.pressPrev.addEventListener('click', () => {
+    if (calib.phase !== 'press' || calib.pressPos === 0) return;
+    calibRecordPress();
+    calibGoTo(calib.pressPos - 1);
+  });
+  cel.pressNext.addEventListener('click', () => {
+    if (calib.phase !== 'press') return;
+    calibRecordPress();
+    calibAdvance();
+  });
+  cel.pressSkip.addEventListener('click', () => {
+    if (calib.phase !== 'press') return;
+    calib.pressState[calib.pressZone] = 'skipped';
+    calib.pressPeak[calib.pressZone] = null;
+    calibAdvance();
+  });
+  cel.pressFinish.addEventListener('click', () => {
+    if (calib.phase !== 'press') return;
+    calibRecordPress();
+    calibFinishPress();
+  });
+  cel.stop.addEventListener('click', calibStop);
+
+  const goToProfile = () => {
+    cel.profileName.value = `Auto-cal ${new Date().toLocaleString()}`;
+    cel.applyNow.checked = false;
+    calibShowStep(5);
+  };
+  // Results (step 3) -> standby verify (step 4).
+  cel.toVerify.addEventListener('click', () => {
+    calib.phase = 'results';
+    cel.verifyResults.hidden = true;
+    cel.verifyProgress.hidden = true;
+    cel.verifyStart.disabled = false;
+    cel.verifyApply.disabled = false;
+    setHoldProgress(cel.verifyBar, 0);
+    calibShowStep(4);
+  });
+  cel.toProfile.addEventListener('click', goToProfile);        // results -> skip verify
+  cel.verifyToProfile.addEventListener('click', goToProfile);  // verify -> profile
+  cel.verifyStart.addEventListener('click', calibStartVerify);
+  cel.verifySkip.addEventListener('click', goToProfile);
+  cel.verifyApply.addEventListener('click', calibApplyVerify);
+
+  cel.profileForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    calibCreateProfile();
+  });
+  document.querySelectorAll('.calib-restart').forEach((btn) =>
+    btn.addEventListener('click', () => { calibReset(); calibResetParams(); }));
+  initAdjustmentToggles();
+}
+
+// --- Live calibration ------------------------------------------------------
+
+// Tunes thresholds during real play. Per zone it tracks the resting noise floor
+// as a slow envelope, then detects excursions (a delta rising a clear margin
+// over the floor and lasting a few frames). Each excursion is classified against
+// the firmware's own trigger bitmap: a real trigger is a hit (tight if it barely
+// cleared the threshold), an untouched excursion that climbed near the threshold
+// is a near-miss - the brief in-game tap that falls just short. On stop it
+// suggests lowering the zones that miss; an opt-in mode lowers them live.
+
+const LIVE_RISE_MARGIN = 6;     // delta over floor that starts an excursion
+const LIVE_MIN_EXCURSION = 8;   // min excursion height over floor to count
+const LIVE_FALL_MARGIN = 3;     // excursion ends when delta falls back near floor
+const LIVE_MIN_FRAMES = 2;      // frames an excursion must last (drops 1-frame noise)
+const LIVE_NEAR_FRAC = 0.65;    // untouched peak >= thr*frac counts as a near-miss
+const LIVE_TIGHT_MARGIN = 8;    // triggered but peak within this of thr = tight
+const LIVE_MISS_MIN = 2;        // near-misses (or tight hits) before we suggest
+const LIVE_UNDER_MARGIN = 4;    // place a lowered threshold this far under the peak
+const LIVE_SAFE_MARGIN = 8;     // never drop a threshold below floor + this
+const LIVE_AUTO_MS = 10000;     // auto-apply: quiet window on a zone before lowering
+const LIVE_RENDER_MS = 500;     // observation table refresh throttle
+
+const liveCal = {
+  running: false,
+  paused: false,
+  autoApply: false,
+  startedAt: 0,
+  lastRender: 0,
+  noiseFloor: new Array(N_Z).fill(0),
+  exc: Array.from({ length: N_Z }, () => ({ active: false, peak: 0, frames: 0, triggered: false })),
+  stats: Array.from({ length: N_Z }, () => ({
+    hits: 0, tight: 0, miss: 0, missPeak: 0, minTrig: Infinity, lastTrigAt: 0, lastAutoAt: 0,
+  })),
+};
+
+const lcel = {
+  start: document.getElementById('livecal-start'),
+  pause: document.getElementById('livecal-pause'),
+  resume: document.getElementById('livecal-resume'),
+  stop: document.getElementById('livecal-stop'),
+  state: document.getElementById('livecal-state'),
+  elapsed: document.getElementById('livecal-elapsed'),
+  autoapply: document.getElementById('livecal-autoapply'),
+  rows: document.getElementById('livecal-rows'),
+  review: document.getElementById('livecal-review'),
+  summary: document.getElementById('livecal-summary'),
+  reviewRows: document.getElementById('livecal-review-rows'),
+  apply: document.getElementById('livecal-apply'),
+  discard: document.getElementById('livecal-discard'),
+};
+
+function liveCalSetState(label, tone) {
+  lcel.state.textContent = label;
+  lcel.state.className = `badge ${tone}`;
+}
+
+function liveCalResetStats() {
+  liveCal.noiseFloor.fill(0);
+  liveCal.exc.forEach((e) => { e.active = false; e.peak = 0; e.frames = 0; e.triggered = false; });
+  liveCal.stats.forEach((s) => {
+    s.hits = 0; s.tight = 0; s.miss = 0; s.missPeak = 0;
+    s.minTrig = Infinity; s.lastTrigAt = 0; s.lastAutoAt = 0;
+  });
+}
+
+function liveCalStart() {
+  if (!config) { notify('Connect the board before live calibration', 'warn'); return; }
+  liveCalResetStats();
+  // Seed the noise floor from a prior wizard noise pass when available.
+  for (let z = 0; z < N_Z; z += 1) liveCal.noiseFloor[z] = calib.noiseCeil[z] || 0;
+  const now = performance.now();
+  liveCal.stats.forEach((s) => { s.lastTrigAt = now; });
+  liveCal.running = true;
+  liveCal.paused = false;
+  liveCal.startedAt = now;
+  liveCal.lastRender = 0;
+  lcel.start.hidden = true;
+  lcel.pause.hidden = false;
+  lcel.resume.hidden = true;
+  lcel.stop.hidden = false;
+  lcel.review.hidden = true;
+  liveCalSetState('recording', 'badge-on');
+  liveCalRenderTable();
+}
+
+function liveCalPause() {
+  if (!liveCal.running) return;
+  liveCal.paused = true;
+  lcel.pause.hidden = true;
+  lcel.resume.hidden = false;
+  liveCalSetState('paused', 'badge-off');
+}
+
+function liveCalResume() {
+  if (!liveCal.running) return;
+  liveCal.paused = false;
+  lcel.pause.hidden = false;
+  lcel.resume.hidden = true;
+  liveCalSetState('recording', 'badge-on');
+}
+
+function liveCalStop() {
+  if (!liveCal.running) return;
+  liveCal.running = false;
+  liveCal.paused = false;
+  lcel.start.hidden = false;
+  lcel.pause.hidden = true;
+  lcel.resume.hidden = true;
+  lcel.stop.hidden = true;
+  liveCalSetState('idle', 'badge-off');
+  liveCalRenderTable();
+
+  const adjust = liveCalComputeSuggestions();
+  buildAdjustmentReview(lcel.reviewRows, adjust);
+  lcel.summary.textContent = adjust.length === 0
+    ? 'No adjustment suggested - no zone missed a clear press. Play more, or lower a few by hand in Tuning.'
+    : `${adjust.length} zone(s) missed clear presses and could be lowered. Uncheck any you want to keep, then apply.`;
+  lcel.review.hidden = false;
+  lcel.apply.disabled = adjust.length === 0;
+}
+
+// Suggested lowering for one zone, or null. Shared by the live table and stop.
+function liveCalSuggestFor(z) {
+  if (!config) return null;
+  const s = liveCal.stats[z];
+  const cur = config.thr[z];
+  const floor = liveCal.noiseFloor[z];
+  if (s.miss >= LIVE_MISS_MIN && s.missPeak > 0) {
+    const t = clampThr(Math.max(floor + LIVE_SAFE_MARGIN, s.missPeak - LIVE_UNDER_MARGIN));
+    if (t < cur) return { suggested: t, dir: 'lower', reason: `${s.miss} near-miss up to ${s.missPeak}` };
+  }
+  if (s.miss === 0 && s.tight >= LIVE_MISS_MIN && Number.isFinite(s.minTrig)) {
+    const t = clampThr(Math.max(floor + LIVE_SAFE_MARGIN, s.minTrig - LIVE_UNDER_MARGIN));
+    if (t < cur) return { suggested: t, dir: 'lower', reason: `${s.tight} tight hits, min ${s.minTrig}` };
+  }
+  return null;
+}
+
+function liveCalComputeSuggestions() {
+  const adjust = [];
+  for (let z = 0; z < N_Z; z += 1) {
+    if (zoneToElectrode[z] < 0) continue;
+    const sug = liveCalSuggestFor(z);
+    if (sug) adjust.push({ zone: z, current: config.thr[z], suggested: sug.suggested, dir: sug.dir, reason: sug.reason });
+  }
+  return adjust;
+}
+
+// Classify one finished excursion on zone z into the running stats.
+function liveCalClassify(z) {
+  const exc = liveCal.exc[z];
+  if (exc.frames < LIVE_MIN_FRAMES) return;                     // too brief = noise spike
+  if (exc.peak < liveCal.noiseFloor[z] + LIVE_MIN_EXCURSION) return;  // too small = noise
+  const s = liveCal.stats[z];
+  const onThr = config.thr[z];
+  if (exc.triggered) {
+    s.hits += 1;
+    s.lastTrigAt = performance.now();
+    if (exc.peak - onThr < LIVE_TIGHT_MARGIN) s.tight += 1;
+    if (exc.peak < s.minTrig) s.minTrig = exc.peak;
+  } else if (exc.peak >= onThr * LIVE_NEAR_FRAC) {
+    s.miss += 1;
+    // Only peaks below the threshold are fixable by lowering it (a peak above
+    // that never triggered was blocked by debounce, not the threshold).
+    if (exc.peak < onThr && exc.peak > s.missPeak) s.missPeak = exc.peak;
+  }
+}
+
+function liveCalFrame(data) {
+  if (!liveCal.running || liveCal.paused) return;
+  if (!data.connected || !config) {
+    liveCalStop();
+    notify('Board disconnected - live calibration stopped', 'warn');
+    return;
+  }
+  for (let z = 0; z < N_Z; z += 1) {
+    const e = zoneToElectrode[z];
+    if (e < 0) continue;
+    const delta = data.deltas[e];
+    const active = data.zonesActive[z];
+    const exc = liveCal.exc[z];
+    let floor = liveCal.noiseFloor[z];
+
+    if (!exc.active) {
+      // Track the resting noise floor only while quiet: rise a bit toward higher
+      // noise, decay very slowly - an envelope just under the real noise.
+      if (!active) {
+        floor += (delta - floor) * (delta > floor ? 0.05 : 0.002);
+        liveCal.noiseFloor[z] = floor;
+      }
+      if (delta >= floor + LIVE_RISE_MARGIN) {
+        exc.active = true; exc.peak = delta; exc.frames = 1; exc.triggered = active;
+      }
+    } else {
+      exc.frames += 1;
+      if (delta > exc.peak) exc.peak = delta;
+      if (active) exc.triggered = true;
+      if (delta <= floor + LIVE_FALL_MARGIN) {
+        liveCalClassify(z);
+        exc.active = false; exc.peak = 0; exc.frames = 0; exc.triggered = false;
+      }
+    }
+  }
+
+  const now = performance.now();
+  if (now - liveCal.lastRender >= LIVE_RENDER_MS) {
+    liveCal.lastRender = now;
+    liveCalRenderTable();
+    lcel.elapsed.textContent = `${((now - liveCal.startedAt) / 1000).toFixed(0)} s`;
+    if (liveCal.autoApply) liveCalAutoApply(now);
+  }
+}
+
+// Opt-in: lower a zone live once it has steady near-misses and has not triggered
+// for a while (so we are not fighting an active press).
+function liveCalAutoApply(now) {
+  for (let z = 0; z < N_Z; z += 1) {
+    if (zoneToElectrode[z] < 0) continue;
+    const s = liveCal.stats[z];
+    if (s.miss < LIVE_MISS_MIN || s.missPeak <= 0) continue;
+    if (now - s.lastTrigAt < LIVE_AUTO_MS || now - s.lastAutoAt < LIVE_AUTO_MS) continue;
+    const sug = liveCalSuggestFor(z);
+    if (!sug) continue;
+    send(`thr ${zones[z]} ${sug.suggested}`);
+    s.lastAutoAt = now;
+    s.miss = 0; s.missPeak = 0;   // re-observe at the new threshold
+    notify(`Live: lowered ${zones[z]} to ${sug.suggested}`, 'warn');
+  }
+}
+
+function liveCalRenderTable() {
+  lcel.rows.textContent = '';
+  for (let z = 0; z < N_Z; z += 1) {
+    if (zoneToElectrode[z] < 0) continue;
+    const s = liveCal.stats[z];
+    const sug = liveCalSuggestFor(z);
+    const row = document.createElement('tr');
+    const touched = s.hits || s.miss;
+    if (!touched) row.classList.add('livecal-idle');
+    if (s.miss) row.classList.add('livecal-miss');
+
+    const cells = [
+      zones[z],
+      Math.round(liveCal.noiseFloor[z]),
+      config ? config.thr[z] : '-',
+      s.hits,
+      s.tight,
+      s.miss,
+      s.missPeak || '-',
+    ];
+    cells.forEach((text, i) => {
+      const td = document.createElement('td');
+      if (i === 0) td.className = 'zone-name';
+      if (i === 5) td.className = 'livecal-nearmiss';
+      td.textContent = text;
+      row.appendChild(td);
+    });
+    const sugTd = document.createElement('td');
+    sugTd.className = 'livecal-suggest';
+    sugTd.textContent = sug ? sug.suggested : '-';
+    row.appendChild(sugTd);
+    lcel.rows.appendChild(row);
+  }
+}
+
+function liveCalApply() {
+  const accepted = collectAcceptedAdjustments(lcel.reviewRows);
+  if (!accepted.length) { notify('Nothing selected to apply', 'warn'); return; }
+  applyAdjustmentsToBoard(accepted);
+  notify(`Applied ${accepted.length} adjustment(s) - Save to flash to keep them`);
+  lcel.review.hidden = true;
+  liveCalResetStats();
+  liveCalRenderTable();
+}
+
+function liveCalInit() {
+  liveCalSetState('idle', 'badge-off');
+  liveCalRenderTable();
+  lcel.start.addEventListener('click', liveCalStart);
+  lcel.pause.addEventListener('click', liveCalPause);
+  lcel.resume.addEventListener('click', liveCalResume);
+  lcel.stop.addEventListener('click', liveCalStop);
+  lcel.autoapply.addEventListener('change', () => { liveCal.autoApply = lcel.autoapply.checked; });
+  lcel.apply.addEventListener('click', liveCalApply);
+  lcel.discard.addEventListener('click', () => {
+    lcel.review.hidden = true;
+    liveCalResetStats();
+    liveCalRenderTable();
+  });
+}
 
 // --- Render ----------------------------------------------------------------
 
@@ -2112,8 +3181,9 @@ function render(data) {
   els.link.className = `badge ${data.connected ? 'badge-on' : 'badge-off'}`;
   els.disconnect.hidden = !data.connected;
 
-  const hasConfig = config !== null;
-  needsConfig.forEach((el) => { el.hidden = hasConfig; });
+  // While disconnected, the board-driven tabs show the shared gate and their
+  // nav entry is locked; Information stays open.
+  updateConnectGate();
 
   // Auto-scale the card bars to the deltas actually seen (rise fast, fall slow).
   const frameMax = data.deltas.reduce((m, v) => (v > m ? v : m), 0);
@@ -2211,6 +3281,7 @@ function render(data) {
     while (sparkBuffer.length > SPARK_LEN) sparkBuffer.shift();
   }
   drawSpark();
+  updateLiveThr();   // keep the inline threshold in sync (skips while editing)
 
   // Global trace: push every zone's delta and redraw all lines.
   for (let z = 0; z < N_Z; z += 1) {
@@ -2223,10 +3294,29 @@ function render(data) {
   // Live log stats (and a recorded sample when recording), throttled inside.
   logFrame(data);
 
+  // Advance the auto-calibration wizard while a measurement phase is running.
+  calibFrame(data);
+
+  // Live calibration observes real play whenever it is running.
+  liveCalFrame(data);
+
   trackLearning();
 }
 
 // --- Navigation ------------------------------------------------------------
+
+const sidebarToggle = document.getElementById('sidebar-toggle');
+function syncSidebarToggle(collapsed) {
+  const label = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+  sidebarToggle.setAttribute('aria-label', label);
+  sidebarToggle.title = label;
+}
+syncSidebarToggle(document.body.classList.contains('sidebar-collapsed'));
+sidebarToggle.addEventListener('click', () => {
+  const collapsed = document.body.classList.toggle('sidebar-collapsed');
+  localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? '1' : '0');
+  syncSidebarToggle(collapsed);
+});
 
 document.querySelectorAll('.nav button').forEach((button) => {
   button.addEventListener('click', () => {
@@ -2236,6 +3326,9 @@ document.querySelectorAll('.nav button').forEach((button) => {
       section.classList.toggle('active', section.dataset.section === button.dataset.section);
     });
     stopCalibration();
+    // A locked tab navigates as usual, then shows the gate in place of its
+    // content; Information (never locked) shows normally.
+    updateConnectGate();
   });
 });
 
@@ -2370,8 +3463,9 @@ els.disconnect.addEventListener('click', async () => {
 
 const livePads = new Map();
 
-// This cabinet has D on the outer ring and E inside; the stock geometry draws
-// them the other way round, so swap the two families for the preview only.
+// This cabinet needs a couple of families flipped vs the stock geometry, for the
+// preview only: D is on the outer ring (E inside), and C1 is on the right (C2 on
+// the left).
 function swapDE(geo) {
   for (let i = 1; i <= 8; i += 1) {
     const d = `D${i}`;
@@ -2380,6 +3474,9 @@ function swapDE(geo) {
     geo[d] = geo[e];
     geo[e] = tmp;
   }
+  const c = geo.C1;
+  geo.C1 = geo.C2;
+  geo.C2 = c;
   return geo;
 }
 
@@ -2387,9 +3484,11 @@ function start() {
   zones = zoneNames();
   buildGlobalLegend();
   buildLogTable();
-  updateRecordUi();
   updateRecordStatus();
   renderProfiles();
+  calibInit();
+  liveCalInit();
+  initLiveThr();
   geometry = swapDE({ ...ZONES_GEOMETRY });
 
   buildDisc(els.liveDisc, livePads, (zone) => {
@@ -2402,8 +3501,8 @@ function start() {
   transport = createTransport(state, () => render(state));
 
   els.connect.hidden = false;
-  // The sidebar Connect button and every inline "Connect" in a needs-config
-  // notice trigger the same flow.
+  // The sidebar Connect button and the gate's inline "Connect" trigger the same
+  // flow, so the gate is a first-class way to connect from any locked tab.
   const connectButtons = [els.connect, ...document.querySelectorAll('.connect-inline')];
   const connectBoard = async () => {
     connectButtons.forEach((b) => { b.disabled = true; });
@@ -2418,6 +3517,10 @@ function start() {
   };
   connectButtons.forEach((b) => b.addEventListener('click', connectBoard));
   els.link.textContent = 'click Connect to pick the board';
+
+  // Lock the shell before the first frame arrives, so the tabs read correctly
+  // on load rather than only after the first render.
+  updateConnectGate();
 }
 
 start();

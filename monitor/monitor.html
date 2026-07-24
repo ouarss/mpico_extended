@@ -13,17 +13,48 @@
 <body>
 
 <nav class="sidebar">
-  <div class="brand">Mai Pico<span>Touch monitor</span></div>
+  <div class="sidebar-top">
+    <div class="brand">Mai Pico<span>Touch monitor</span></div>
+    <button type="button" id="sidebar-toggle" class="sidebar-toggle"
+            aria-label="Collapse sidebar" title="Collapse sidebar">
+      <svg class="sidebar-toggle-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <polyline points="15 6 9 12 15 18"></polyline>
+      </svg>
+    </button>
+  </div>
 
   <ul class="nav">
-    <li><button type="button" data-section="info" class="active">Information</button></li>
-    <li><button type="button" data-section="live">Live</button></li>
-    <li><button type="button" data-section="tuning">Tuning</button></li>
-    <li><button type="button" data-section="mapping">Mapping</button></li>
-    <li><button type="button" data-section="board">Board</button></li>
-    <li><button type="button" data-section="profiles">Profiles</button></li>
-    <li><button type="button" data-section="logs">Logs</button></li>
-    <li><button type="button" data-section="console">Console</button></li>
+    <li><button type="button" data-section="info" class="active" title="Information">
+      <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><line x1="12" y1="11" x2="12" y2="16"></line><line x1="12" y1="8" x2="12" y2="8"></line></svg>
+      <span>Information</span></button></li>
+    <li><button type="button" data-section="live" title="Live">
+      <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="2 12 6 12 8 6 11 18 13 9 15 13 22 13"></polyline></svg>
+      <span>Live</span></button></li>
+    <li><button type="button" data-section="tuning" title="Tuning">
+      <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="7" x2="20" y2="7"></line><circle cx="9" cy="7" r="2.2"></circle><line x1="4" y1="12" x2="20" y2="12"></line><circle cx="15" cy="12" r="2.2"></circle><line x1="4" y1="17" x2="20" y2="17"></line><circle cx="8" cy="17" r="2.2"></circle></svg>
+      <span>Tuning</span></button></li>
+    <li><button type="button" data-section="mapping" title="Mapping">
+      <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"></circle><circle cx="12" cy="12" r="3"></circle><line x1="12" y1="2" x2="12" y2="5"></line><line x1="12" y1="19" x2="12" y2="22"></line><line x1="2" y1="12" x2="5" y2="12"></line><line x1="19" y1="12" x2="22" y2="12"></line></svg>
+      <span>Mapping</span></button></li>
+    <li><button type="button" data-section="board" title="Board">
+      <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1"></rect><line x1="10" y1="3" x2="10" y2="7"></line><line x1="14" y1="3" x2="14" y2="7"></line><line x1="10" y1="17" x2="10" y2="21"></line><line x1="14" y1="17" x2="14" y2="21"></line><line x1="3" y1="10" x2="7" y2="10"></line><line x1="3" y1="14" x2="7" y2="14"></line><line x1="17" y1="10" x2="21" y2="10"></line><line x1="17" y1="14" x2="21" y2="14"></line></svg>
+      <span>Board</span></button></li>
+    <li><button type="button" data-section="calibration" title="Auto Calibration">
+      <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 18a8 8 0 0 1 16 0"></path><line x1="12" y1="18" x2="16" y2="11"></line><circle cx="12" cy="18" r="1.4"></circle></svg>
+      <span>Auto Calibration</span></button></li>
+    <li><button type="button" data-section="livecal" title="Live Calibration">
+      <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="2 12 5 12 7 8 10 16 12 6 14 13 16 10 19 12 22 12"></polyline><circle cx="12" cy="6" r="1.6" fill="currentColor" stroke="none"></circle></svg>
+      <span>Live Calibration</span></button></li>
+    <li><button type="button" data-section="console" title="Console">
+      <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5 7 10 12 5 17"></polyline><line x1="12" y1="17" x2="19" y2="17"></line></svg>
+      <span>Console</span></button></li>
+    <li><button type="button" data-section="logs" title="Logs">
+      <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="20" x2="6" y2="14"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="18" y1="20" x2="18" y2="10"></line></svg>
+      <span>Logs</span></button></li>
+    <li><button type="button" data-section="profiles" title="Profiles">
+      <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+      <span>Profiles</span></button></li>
   </ul>
 
   <div class="sidebar-status">
@@ -44,6 +75,17 @@
     <span id="save-message">Unsaved changes - lost when the board is unplugged.</span>
     <div class="actions">
       <button type="button" data-cmd="save" class="primary">Save to flash</button>
+    </div>
+  </div>
+
+  <!-- Single stand-in shown for every board-driven tab while the board is not
+       connected. Information stays reachable; the other tabs show this until a
+       configuration is received. -->
+  <div id="connect-gate" class="connect-gate" hidden>
+    <div class="panel">
+      <h2>Board not connected</h2>
+      <p>Connect the board to use this tab.</p>
+      <button type="button" class="connect-inline primary">Connect</button>
     </div>
   </div>
 
@@ -308,8 +350,6 @@
         baseline from the current reading &mdash; do it untouched.</p>
     </header>
 
-    <div class="needs-config"><span>Connect the board to see live readings.</span><button type="button" class="connect-inline primary">Connect</button></div>
-
     <div class="readout">
       <span class="readout-label">Active now</span>
       <b id="active">none</b>
@@ -322,24 +362,37 @@
         <svg id="live-disc" class="disc disc-large" viewBox="0 0 420 420" aria-label="Game zones"></svg>
       </div>
 
-      <div class="panel">
-        <h2>Trace</h2>
-        <p class="hint" id="spark-label">Pick a card below to trace its delta.</p>
-        <canvas id="spark" class="spark" width="600" height="180"></canvas>
-        <div class="spark-legend">
-          <span class="spark-key spark-on">threshold ON</span>
-          <span class="spark-key spark-off">threshold OFF</span>
-          <span class="spark-key spark-delta">delta</span>
+      <div class="trace-stack">
+        <div class="panel">
+          <div class="trace-head">
+            <h2>Trace</h2>
+            <div class="trace-thr" id="live-thr" hidden>
+              <label for="live-thr-input">Threshold</label>
+              <input type="number" id="live-thr-input" min="1" max="1000"
+                     autocomplete="off" spellcheck="false">
+              <button type="button" id="live-thr-save" class="icon-btn"
+                      title="Save this threshold to the zone" aria-label="Save threshold">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              </button>
+            </div>
+          </div>
+          <p class="hint" id="spark-label">Pick a card below to trace its delta.</p>
+          <canvas id="spark" class="spark" width="600" height="180"></canvas>
+          <div class="spark-legend">
+            <span class="spark-key spark-on">threshold ON</span>
+            <span class="spark-key spark-off">threshold OFF</span>
+            <span class="spark-key spark-delta">delta</span>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>Trace &mdash; all zones</h2>
+          <p class="hint">Every zone's delta at once, one colour per zone. A line
+            drifting up while nothing is touched is a zone picking up noise.</p>
+          <canvas id="spark-all" class="spark" width="600" height="220"></canvas>
+          <div id="spark-all-legend" class="spark-all-legend"></div>
         </div>
       </div>
-    </div>
-
-    <div class="panel">
-      <h2>Trace &mdash; all zones</h2>
-      <p class="hint">Every zone's delta at once, one colour per zone. A line
-        drifting up while nothing is touched is a zone picking up noise.</p>
-      <canvas id="spark-all" class="spark" width="600" height="220"></canvas>
-      <div id="spark-all-legend" class="spark-all-legend"></div>
     </div>
 
     <div class="panel" id="zone-view">
@@ -365,7 +418,6 @@
       <p class="hint">Values in use on the board. Editing one applies it
         immediately; nothing reaches flash until you save.</p>
     </header>
-    <div class="needs-config"><span>Connect the board to load and edit its configuration.</span><button type="button" class="connect-inline primary">Connect</button></div>
 
     <div class="panel">
       <h2>Signal processing</h2>
@@ -409,7 +461,6 @@
       <p class="hint">Which electrode feeds each zone. Assign by touch, or set
         the electrode number by hand.</p>
     </header>
-    <div class="needs-config"><span>Connect the board to load and edit its configuration.</span><button type="button" class="connect-inline primary">Connect</button></div>
 
     <div class="split map-split">
       <div class="panel">
@@ -456,7 +507,6 @@
         AIME reader. Editing one applies it on the board immediately; nothing
         reaches flash until you save.</p>
     </header>
-    <div class="needs-config"><span>Connect the board to load and edit its configuration.</span><button type="button" class="connect-inline primary">Connect</button></div>
 
     <div class="panel">
       <h2>LEDs &amp; brightness</h2>
@@ -495,7 +545,6 @@
         Applying a profile sends every setting to the board but never saves to
         flash on its own &mdash; use Save to flash once you are happy.</p>
     </header>
-    <div class="needs-config"><span>Connect the board to save its configuration or apply a profile.</span><button type="button" class="connect-inline primary">Connect</button></div>
 
     <div class="panel">
       <h2>Save current config</h2>
@@ -536,7 +585,6 @@
         review how the panel behaves in production. Everything here stays in the
         browser and nothing is written to the board.</p>
     </header>
-    <div class="needs-config"><span>Connect the board to collect live statistics.</span><button type="button" class="connect-inline primary">Connect</button></div>
 
     <div class="panel">
       <div class="profiles-head">
@@ -562,12 +610,12 @@
 
     <div class="panel">
       <h2>Session recording</h2>
-      <p class="hint">Records every frame (per-zone deltas and active state) so a
-        production run can be exported and analysed offline. Capped at 30000
-        samples (about 20 minutes at 25 Hz), then it stops on its own.</p>
+      <p class="hint">Always recording while the board is connected &mdash; a
+        rolling window of the last 30000 samples (about 20 minutes at 25 Hz).
+        Export it any time; Clear starts a fresh window.</p>
       <div class="log-record-bar">
-        <button type="button" id="log-record" class="primary">Record</button>
-        <span class="readout-label">State</span><b id="log-rec-state">stopped</b>
+        <button type="button" id="log-record">Clear log</button>
+        <span class="readout-label">State</span><b id="log-rec-state">recording</b>
         <span class="readout-label">Samples</span><b id="log-rec-count">0</b>
         <span class="readout-label">Duration</span><b id="log-rec-duration">0.0 s</b>
       </div>
@@ -575,6 +623,235 @@
         <button type="button" id="log-session-csv">Export session CSV</button>
         <button type="button" id="log-session-json">Export session JSON</button>
       </div>
+    </div>
+  </section>
+
+  <!-- ==================== CALIBRATION ==================== -->
+  <section class="section" data-section="calibration">
+    <header class="section-head">
+      <h1>Auto-calibration</h1>
+      <p class="hint">A guided wizard that measures each zone's standby noise and
+        its firm-press peak, then derives a threshold that sits above the noise
+        but below a real press. The result is saved as a profile you can apply
+        &mdash; nothing reaches flash on its own.</p>
+    </header>
+
+    <ol class="calib-steps" id="calib-steps">
+      <li data-step="1" class="active">Noise</li>
+      <li data-step="2">Press</li>
+      <li data-step="3">Results</li>
+      <li data-step="4">Verify</li>
+      <li data-step="5">Profile</li>
+    </ol>
+
+    <!-- STEP 1: baseline / noise -->
+    <div class="panel calib-step" data-step="1">
+      <h2>Step 1 &mdash; Measure standby noise</h2>
+      <p class="hint">Leave the glass <strong>untouched</strong> for the whole
+        measurement. First take an idle level so every zone reads near zero, then
+        start: for the countdown the wizard records each zone's resting noise
+        floor (the highest delta it reaches on its own).</p>
+      <div class="actions">
+        <button type="button" id="calib-rebase">Set idle level</button>
+        <button type="button" id="calib-noise-start" class="primary">Start noise measurement</button>
+      </div>
+      <div id="calib-noise-progress" class="calib-progress" hidden>
+        <div id="calib-noise-bar" class="hold-bar"><span class="hold-fill"></span></div>
+        <span id="calib-noise-count" class="dialog-progress">-</span>
+      </div>
+    </div>
+
+    <!-- STEP 2: press force per zone -->
+    <div class="panel calib-step" data-step="2" hidden>
+      <h2>Step 2 &mdash; Measure press force, zone by zone</h2>
+      <p class="hint" id="calib-press-instr">Press and release the highlighted
+        zone firmly, at your own pace. The wizard counts real presses &mdash; a
+        delta rising well above the noise measured in step 1 &mdash; not a clock.
+        The live max is the strongest delta seen so far.</p>
+      <div class="calib-advance-row">
+        <span class="readout-label">Advance</span>
+        <div class="btn-group calib-advance">
+          <button type="button" id="calib-adv-auto" class="seg on">Auto</button>
+          <button type="button" id="calib-adv-manual" class="seg">Manual</button>
+        </div>
+        <span class="calib-advance-hint" id="calib-advance-hint">Auto: moves on after 3 presses.</span>
+      </div>
+      <div class="readout">
+        <span class="readout-label">Zone</span><b id="calib-press-zone">-</b>
+        <span class="readout-label">Live max</span><b id="calib-press-max">0</b>
+        <span class="readout-label">Presses</span><b id="calib-press-count">0 / 3</b>
+      </div>
+      <div class="calib-position" id="calib-press-progress">-</div>
+      <p class="calib-strip-hint">Jump to any zone to (re)measure it. Re-measuring
+        overwrites that zone. Statuses: current, measured, skipped, pending.</p>
+      <div id="calib-zone-strip" class="calib-zone-strip"></div>
+      <div id="calib-press-bar" class="hold-bar"><span class="hold-fill"></span></div>
+      <div class="actions">
+        <button type="button" id="calib-press-prev">Previous</button>
+        <button type="button" id="calib-press-next" class="primary">Next</button>
+        <button type="button" id="calib-press-skip">Skip</button>
+        <button type="button" id="calib-press-finish">Finish</button>
+        <button type="button" id="calib-stop">Stop</button>
+      </div>
+    </div>
+
+    <!-- STEP 3: results + parameters -->
+    <div class="panel calib-step" data-step="3" hidden>
+      <h2>Step 3 &mdash; Review the suggested thresholds</h2>
+      <p class="hint">Each threshold is placed above the zone's noise ceiling and
+        below its press peak. A <strong class="calib-risky-word">risky</strong>
+        zone has noise too close to its press &mdash; its threshold is a
+        best-effort just above the noise. Zones you skipped keep their current
+        threshold.</p>
+      <div class="table-scroll">
+        <table class="zone-table calib-table">
+          <thead>
+            <tr><th>Zone</th><th>Noise ceiling</th><th>Press peak</th><th>Suggested threshold</th><th>Status</th></tr>
+          </thead>
+          <tbody id="calib-result-rows"></tbody>
+        </table>
+      </div>
+
+      <h3 class="calib-subhead">Recommended global parameters</h3>
+      <p class="hint">Debounce is the key anti-spike control: a change must hold
+        this many frames to be accepted, so brief noise spikes are dropped before
+        they ever count as a press.</p>
+      <div id="calib-params" class="proc-fields"></div>
+
+      <div class="actions calib-nav">
+        <button type="button" id="calib-to-verify" class="primary">Verify in standby</button>
+        <button type="button" id="calib-to-profile">Skip to profile</button>
+        <button type="button" class="calib-restart">Start over</button>
+      </div>
+    </div>
+
+    <!-- STEP 4: verify against standby noise -->
+    <div class="panel calib-step" data-step="4" hidden>
+      <h2>Step 4 &mdash; Verify against standby noise</h2>
+      <p class="hint">A longer <strong>untouched</strong> watch (the 15&nbsp;s of step 1
+        is short). Leave the glass alone: the wizard measures each zone's real
+        resting noise over a full minute, then compares it to the thresholds from
+        step&nbsp;3. It flags any zone the noise would <strong>falsely
+        trigger</strong> (raise) and any zone sitting well above its real noise
+        (safe to lower). Review each suggestion and apply the ones you want.</p>
+      <div class="actions">
+        <button type="button" id="calib-verify-start" class="primary">Start standby check (60 s)</button>
+        <button type="button" id="calib-verify-skip">Skip verify</button>
+      </div>
+      <div id="calib-verify-progress" class="calib-progress" hidden>
+        <div id="calib-verify-bar" class="hold-bar"><span class="hold-fill"></span></div>
+        <span id="calib-verify-count" class="dialog-progress">-</span>
+      </div>
+      <div id="calib-verify-results" hidden>
+        <p class="hint" id="calib-verify-summary">-</p>
+        <div class="adjust-actions">
+          <button type="button" class="adjust-all" data-target="calib-verify-rows">Accept all</button>
+          <button type="button" class="adjust-none" data-target="calib-verify-rows">Accept none</button>
+        </div>
+        <div class="table-scroll">
+          <table class="zone-table adjust-table">
+            <thead>
+              <tr><th>Apply</th><th>Zone</th><th>Current</th><th>Suggested</th><th>Change</th><th>Reason</th></tr>
+            </thead>
+            <tbody id="calib-verify-rows"></tbody>
+          </table>
+        </div>
+        <div class="actions calib-nav">
+          <button type="button" id="calib-verify-apply" class="primary">Apply selected</button>
+          <button type="button" id="calib-verify-to-profile">Continue to profile</button>
+          <button type="button" class="calib-restart">Start over</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- STEP 5: create the profile -->
+    <div class="panel calib-step" data-step="5" hidden>
+      <h2>Step 5 &mdash; Create the profile</h2>
+      <p class="hint">Saves a profile with the suggested per-zone thresholds and
+        the parameters above. It is stored in this browser like any other
+        profile; apply it here or from the Profiles tab. Applying sends it to the
+        board but never saves to flash on its own.</p>
+      <form id="calib-profile-form" class="console-form">
+        <input type="text" id="calib-profile-name" placeholder="Profile name"
+               autocomplete="off" spellcheck="false">
+        <button type="submit" class="primary">Create profile from calibration</button>
+      </form>
+      <label class="calib-applynow">
+        <input type="checkbox" id="calib-apply-now"> Apply to the board right after creating it
+      </label>
+      <div class="actions calib-nav">
+        <button type="button" class="calib-restart">Start over</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== LIVE CALIBRATION ==================== -->
+  <section class="section" data-section="livecal">
+    <header class="section-head">
+      <h1>Live Calibration</h1>
+      <p class="hint">Tune thresholds <strong>while you play</strong>. Start it, play
+        normally, and the monitor watches every zone: it separates real presses
+        (a clear, sustained delta) from noise, and spots <strong>near-misses</strong>
+        &mdash; firm gestures whose delta climbed close to the threshold but never
+        triggered. Those are the brief in-game taps that fall just short. On stop it
+        suggests <strong>lowering</strong> the zones that miss (and raising any that
+        fire on noise), for you to accept one by one or all at once.</p>
+    </header>
+
+    <div class="panel">
+      <div class="actions livecal-controls">
+        <button type="button" id="livecal-start" class="primary">Start</button>
+        <button type="button" id="livecal-pause" hidden>Pause</button>
+        <button type="button" id="livecal-resume" hidden>Resume</button>
+        <button type="button" id="livecal-stop" hidden>Stop &amp; review</button>
+        <span id="livecal-state" class="badge badge-off">idle</span>
+        <span id="livecal-elapsed" class="dialog-progress"></span>
+      </div>
+      <label class="livecal-auto">
+        <input type="checkbox" id="livecal-autoapply">
+        Auto-apply lowering during play <span class="hint-inline">(advanced &mdash;
+        after ~10&nbsp;s of steady near-misses with no trigger on a zone, its
+        threshold is lowered live; off by default)</span>
+      </label>
+    </div>
+
+    <div class="panel">
+      <h2>Live observations</h2>
+      <p class="hint">Updated a couple of times per second. <b>Hits</b> = real
+        triggers, <b>Tight</b> = triggered but barely, <b>Near-miss</b> = clear press
+        that did not trigger. A suggested threshold appears once there is enough to
+        act on.</p>
+      <div class="table-scroll">
+        <table class="zone-table livecal-table">
+          <thead>
+            <tr><th>Zone</th><th>Noise floor</th><th>Threshold</th><th>Hits</th><th>Tight</th><th>Near-miss</th><th>Peak miss</th><th>Suggested</th></tr>
+          </thead>
+          <tbody id="livecal-rows"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel" id="livecal-review" hidden>
+      <h2>Suggested adjustments</h2>
+      <p class="hint" id="livecal-summary">-</p>
+      <div class="adjust-actions">
+        <button type="button" class="adjust-all" data-target="livecal-review-rows">Accept all</button>
+        <button type="button" class="adjust-none" data-target="livecal-review-rows">Accept none</button>
+      </div>
+      <div class="table-scroll">
+        <table class="zone-table adjust-table">
+          <thead>
+            <tr><th>Apply</th><th>Zone</th><th>Current</th><th>Suggested</th><th>Change</th><th>Reason</th></tr>
+          </thead>
+          <tbody id="livecal-review-rows"></tbody>
+        </table>
+      </div>
+      <div class="actions">
+        <button type="button" id="livecal-apply" class="primary">Apply selected to board</button>
+        <button type="button" id="livecal-discard">Discard</button>
+      </div>
+      <p class="hint">Applying sends <code>thr</code> live to the board (banner turns
+        unsaved). Review in Tuning, then Save to flash to keep it.</p>
     </div>
   </section>
 
