@@ -180,6 +180,15 @@ static void mpr121_resume(uint8_t addr, uint8_t ecr)
     write_reg(addr, MPR121_ELECTRODE_CONFIG_REG, ecr);
 }
 
+// A stop/resume of the ECR reloads the internal baseline from the current
+// filtered value (CL=10, "load 5MSB") and re-runs autoconfig -- the clean reset
+// used to unstick a slow-falling hardware baseline.
+void mpr121_reseed(uint8_t addr)
+{
+    uint8_t ecr = mpr121_stop(addr);
+    mpr121_resume(addr, ecr);
+}
+
 void mpr121_filter(uint8_t addr, uint8_t ffi, uint8_t sfi, uint8_t esi)
 {
     uint8_t ecr = mpr121_stop(addr);

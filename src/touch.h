@@ -37,6 +37,12 @@ const uint16_t *touch_filtered();
 const uint16_t *touch_baselines();
 const int16_t *touch_deltas();
 
+/* Peak-hold delta per electrode: max since the last touch_clear_peaks(). The
+   feed emits these instead of the instantaneous delta so no 1 kHz spike is
+   invisible at the 25 Hz frame rate. */
+const int16_t *touch_peaks(void);
+void touch_clear_peaks(void);
+
 void touch_update_config();
 unsigned touch_count(unsigned key);
 void touch_reset_stat();

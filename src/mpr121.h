@@ -20,4 +20,10 @@ bool mpr121_baseline(uint8_t addr, uint8_t *baseline, int num);
 void mpr121_filter(uint8_t addr, uint8_t ffi, uint8_t sfi, uint8_t esi);
 void mpr121_gain(uint8_t addr, uint8_t cdc, uint8_t cdt);
 
+/* Reseed the hardware baseline by toggling the ECR (stop then resume). With
+   CL=10 ("load 5MSB") the MPR121 reloads its internal baseline from the current
+   filtered value and re-runs autoconfig (the per-electrode charge-current
+   search) -- the clean reset a stuck, slow-falling baseline needs. */
+void mpr121_reseed(uint8_t addr);
+
 #endif

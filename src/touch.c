@@ -21,6 +21,7 @@
 #include <ctype.h>
 #include <stdbool.h>
 
+#include "pico/time.h"
 #include "bsp/board.h"
 #include "hardware/gpio.h"
 #include "hardware/i2c.h"
@@ -43,6 +44,10 @@ static struct {
     uint8_t off_count[36];
     bool active[36];
 } ts;
+
+/* Peak-hold of the per-channel delta: the max seen since the last read by the
+   feed, so a spike between two 25 Hz frames is not lost. */
+static int16_t peak[36];
 
 static uint16_t avg_hist[36][SENSE_AVG_MAX];
 static uint8_t avg_idx[3];
@@ -139,6 +144,16 @@ void touch_set_map(unsigned sensor, unsigned key)
 
 void touch_rebase()
 {
+    // Reload each MPR121's internal baseline from the current filtered value and
+    // re-run autoconfig. The tracked hardware baseline stays stuck high after a
+    // capacitive event, so re-reading it below would just carry the stuck value
+    // over; reseeding first is the real fix. A one-shot 30 ms block lets the
+    // filter settle on fresh readings before we read them back.
+    for (int m = 0; m < 3; m++) {
+        mpr121_reseed(MPR121_BASE_ADDR + m);
+    }
+    sleep_ms(30);
+
     for (int m = 0; m < 3; m++) {
         uint16_t f[12] = {0};
         uint8_t b[12] = {0};
@@ -216,6 +231,9 @@ static void decide_channel(int ch)
         d = 0;
     }
     ts.delta[ch] = d;
+    if (d > peak[ch]) {
+        peak[ch] = d;
+    }
 
     int32_t on = mai_cfg->sense.threshold[zone];
     int32_t off = on - (on * mai_cfg->sense.hysteresis) / 100;
@@ -326,6 +344,16 @@ const uint16_t *touch_baselines()
 const int16_t *touch_deltas()
 {
     return ts.delta;
+}
+
+const int16_t *touch_peaks(void)
+{
+    return peak;
+}
+
+void touch_clear_peaks(void)
+{
+    memset(peak, 0, sizeof(peak));
 }
 
 bool touch_touched(unsigned key)

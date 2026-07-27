@@ -171,6 +171,8 @@ const els = {
   logRecDuration: document.getElementById('log-rec-duration'),
   logSessionCsv: document.getElementById('log-session-csv'),
   logSessionJson: document.getElementById('log-session-json'),
+  trigRows: document.getElementById('trig-rows'),
+  trigClear: document.getElementById('trig-clear'),
 };
 
 // Single "connect the board" gate that stands in for every board-driven tab
@@ -388,6 +390,9 @@ function paintCell(cell, filtered, baseline, delta, threshold, active) {
 let liveSelection = null;   // { kind: 'zone'|'electrode', index }
 const sparkBuffer = [];
 const allBuffers = Array.from({ length: N_Z }, () => []);
+// Delta ring buffer of the zone targeted in the calibration press step, so the
+// wizard can show a per-zone trace with the shared renderer.
+const calibPressBuffer = [];
 
 function selectLive(selection) {
   liveSelection = selection;
@@ -527,24 +532,32 @@ function initLiveThr() {
   els.liveThrReset.addEventListener('click', resetLiveThr);
 }
 
-function drawSpark() {
-  const canvas = els.spark;
+// The trace canvases are CSS-sized (width: 100%): match the backing store to
+// the displayed size before drawing, otherwise the fixed HTML width attribute
+// gets stretched and the plot looks distorted. Skipped while hidden (size 0).
+function syncCanvasSize(canvas) {
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+  if (w > 0 && canvas.width !== w) canvas.width = w;
+  if (h > 0 && canvas.height !== h) canvas.height = h;
+}
+
+// Core single-zone sparkline: a delta buffer plus optional dashed reference
+// lines on a shared auto-scaled axis. Reused by the Live trace and the wizard's
+// per-zone press trace, so the drawing lives in exactly one place.
+function drawSingleTrace(canvas, buffer, refLines, scaleFloor) {
+  syncCanvasSize(canvas);
   const ctx = canvas.getContext('2d');
   const w = canvas.width;
   const h = canvas.height;
   ctx.clearRect(0, 0, w, h);
 
-  const target = selectionTarget();
-  if (!target || target.electrode < 0 || !config) return;
-
-  const hyst = config.hyst || 0;
-  const on = target.threshold;
-  const off = Math.round(on * (1 - hyst / 100));
-  const peak = sparkBuffer.length ? Math.max(...sparkBuffer) : 0;
-  const scale = Math.max(on * 1.6, peak * 1.1, 40);
+  const peak = buffer.length ? Math.max(...buffer) : 0;
+  const scale = Math.max(scaleFloor, peak * 1.1, 40);
   const y = (v) => h - (Math.min(v, scale) / scale) * (h - 8) - 4;
 
-  const line = (value, colour) => {
+  refLines.forEach(({ value, colour }) => {
+    if (!(value > 0)) return;
     ctx.strokeStyle = colour;
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 4]);
@@ -553,15 +566,13 @@ function drawSpark() {
     ctx.lineTo(w, y(value));
     ctx.stroke();
     ctx.setLineDash([]);
-  };
-  if (on > 0) line(on, '#ff5c5c');       // threshold ON  (var --hot)
-  if (off > 0) line(off, '#ffb000');     // threshold OFF (var --warn)
+  });
 
-  if (sparkBuffer.length > 1) {
+  if (buffer.length > 1) {
     ctx.strokeStyle = '#4ea1ff';         // delta (var --accent)
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    sparkBuffer.forEach((value, i) => {
+    buffer.forEach((value, i) => {
       const px = (i / (SPARK_LEN - 1)) * w;
       if (i === 0) ctx.moveTo(px, y(value));
       else ctx.lineTo(px, y(value));
@@ -570,6 +581,23 @@ function drawSpark() {
   }
 
   drawYMax(ctx, w, h, scale);
+}
+
+function drawSpark() {
+  const canvas = els.spark;
+  const target = selectionTarget();
+  if (!target || target.electrode < 0 || !config) {
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    return;
+  }
+  const hyst = config.hyst || 0;
+  const on = target.threshold;
+  const off = Math.round(on * (1 - hyst / 100));
+  drawSingleTrace(canvas, sparkBuffer, [
+    { value: on, colour: '#ff5c5c' },    // threshold ON  (var --hot)
+    { value: off, colour: '#ffb000' },   // threshold OFF (var --warn)
+  ], on * 1.6);
 }
 
 // One distinct hue per zone, shared by the global trace and its legend.
@@ -596,10 +624,12 @@ function drawYMax(ctx, w, h, scale) {
   ctx.textBaseline = 'alphabetic';
 }
 
-// Global trace: every zone's delta at once, on a shared auto-scaled axis.
-function drawGlobalSpark() {
-  const canvas = els.sparkAll;
+// Global trace: every zone's delta at once, on a shared auto-scaled axis. The
+// target canvas is passed in so the same renderer can also draw onto the
+// wizard's own all-zones canvas during step 1.
+function drawGlobalSpark(canvas) {
   if (!canvas) return;
+  syncCanvasSize(canvas);
   const ctx = canvas.getContext('2d');
   const w = canvas.width;
   const h = canvas.height;
@@ -643,6 +673,67 @@ function buildGlobalLegend() {
   });
 }
 
+// --- Last triggers (Live) --------------------------------------------------
+
+// Real firmware triggers, newest first, fed by the transport's `T` queue. The
+// queue is drained every frame (collection never stops); the table only repaints
+// while the Live tab is on screen.
+const LAST_TRIG_MAX = 20;
+const lastTriggers = [];
+let lastTrigDirty = true;
+
+// Drain the transport's trigger queue once per frame: every event feeds the
+// Last-triggers list, and (while the standby verify runs) the verify counters.
+function drainTriggerEvents() {
+  if (!triggerQueue.length) return;
+  const stamp = new Date().toTimeString().slice(0, 8);   // HH:MM:SS
+  for (const ev of triggerQueue) {
+    lastTriggers.unshift({
+      zone: ev.zone,
+      peak: ev.peak,
+      thr: config ? config.thr[ev.zone] : null,
+      time: stamp,
+    });
+    if (calib.phase === 'verify') {
+      calib.verifyTrig[ev.zone] += ev.count;
+      if (ev.peak > calib.verifyPeak[ev.zone]) calib.verifyPeak[ev.zone] = ev.peak;
+    }
+  }
+  triggerQueue.length = 0;
+  while (lastTriggers.length > LAST_TRIG_MAX) lastTriggers.pop();
+  lastTrigDirty = true;
+}
+
+function renderLastTriggers() {
+  els.trigRows.textContent = '';
+  if (!lastTriggers.length) {
+    const row = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 4;
+    td.className = 'trig-empty';
+    td.textContent = 'No trigger yet.';
+    row.appendChild(td);
+    els.trigRows.appendChild(row);
+    return;
+  }
+  lastTriggers.forEach((t) => {
+    const row = document.createElement('tr');
+    const cells = [t.time, zones[t.zone], t.thr == null ? '-' : t.thr, t.peak];
+    cells.forEach((text, i) => {
+      const td = document.createElement('td');
+      if (i === 1) td.className = 'zone-name';
+      td.textContent = text;
+      row.appendChild(td);
+    });
+    els.trigRows.appendChild(row);
+  });
+}
+
+function clearLastTriggers() {
+  lastTriggers.length = 0;
+  renderLastTriggers();
+}
+
 // --- Signal-processing controls (Tuning) -----------------------------------
 
 // References to the built inputs, so a config refresh can update them.
@@ -657,13 +748,26 @@ const OPTION_HELP = {
       <p>Think of a door that sticks a little: you have to pull slightly harder
       to open it than to keep it shut. Without that stickiness, a finger resting
       exactly at the limit makes the zone chatter on-off-on-off.</p>
-      <p><b>Example</b> - threshold 50, hyst 25%: the zone turns <b>on</b> at 50,
+      <p class="info-example"><b>Example</b> - threshold 50, hyst 25%: the zone turns <b>on</b> at 50,
       and only lets go below <b>37</b> (50 - 25%). Anything wobbling between 37
       and 50 changes nothing.</p>
+      <pre class="info-diagram">delta
+   55            .------.
+                 |      |
+   50 --------- ON ------------- turns ON at 50 (threshold)
+   37 ----------|------ OFF ---- lets go under 37
+    0 __________'        '______   (37 = 50 x (1 - 25% hyst))
+        rest     press    release</pre>
       <p><b>Symptom &rarr; fix:</b> a zone flickers while you hold it &rarr;
       raise hyst (30-40%). Zones feel like they stay on too long after you lift
       &rarr; lower it. <b>Cost of raising:</b> the release comes slightly later
-      (never the press).</p>`,
+      (never the press).</p>
+      <p><b>Note:</b> on a firm tap this margin does nothing - the delta flies
+      far past the threshold and falls back just as fast. It earns its keep on
+      <b>holds and slides</b>: a light or slowly-lifting finger hovers near the
+      threshold for a long moment, and that is when a zone flickers. If you
+      never see flicker, lower it (0 releases exactly at the threshold) - the
+      release only gets snappier.</p>`,
   },
   avg: {
     title: 'Averaging',
@@ -672,9 +776,13 @@ const OPTION_HELP = {
       <p>Like judging someone's mood over a whole minute instead of one blink:
       one odd instant stops mattering. The cost is that you learn it a moment
       later.</p>
-      <p><b>Example</b> - readings 5, 6, <b>60</b>, 5 (that 60 is a noise
+      <p class="info-example"><b>Example</b> - readings 5, 6, <b>60</b>, 5 (that 60 is a noise
       spike). With avg&nbsp;1 the firmware sees 60 and may fire. With avg&nbsp;4
       it sees (5+6+60+5)/4 = <b>19</b>: no trigger.</p>
+      <pre class="info-diagram">frames        1    2    3    4
+raw           5    6   60    5    one noise spike of 60
+avg 1         5    6   60    5    the spike can fire the zone
+avg 4         5    5   19   19    diluted: (5+6+60+5) / 4 = 19</pre>
       <p><b>Symptom &rarr; fix:</b> single-frame spikes still trigger even with
       a sane threshold &rarr; raise to 2-4. <b>Cost:</b> each extra frame is
       real added lag on <b>every</b> press. Prefer <b>debounce</b> first: it
@@ -687,8 +795,10 @@ const OPTION_HELP = {
       telling the game. There is no upside for noise - it is a pure timing
       offset, kept for the rare setup that needs the touch to line up with
       something else.</p>
-      <p><b>Example</b> - latency 3: a press decided now is reported ~3&nbsp;ms
+      <p class="info-example"><b>Example</b> - latency 3: a press decided now is reported ~3&nbsp;ms
       later. You lose 3&nbsp;ms and gain nothing else.</p>
+      <pre class="info-diagram">decision NOW --[ wait N frames ]--> reported to the game
+latency 0:  reported immediately  (keep this)</pre>
       <p><b>Leave it at 0.</b> If a zone is jumpy, the answer is threshold,
       debounce or averaging - never this.</p>`,
   },
@@ -700,9 +810,12 @@ const OPTION_HELP = {
       <b>on</b>. <b>off</b> = how many readings below the release level before
       it turns <b>off</b>. Noise is brief and never repeats cleanly; a real
       finger holds for many readings.</p>
-      <p><b>Example</b> - with <b>on&nbsp;3</b>, a spike lasting 1 reading is
+      <p class="info-example"><b>Example</b> - with <b>on&nbsp;3</b>, a spike lasting 1 reading is
       ignored (it never reaches 3 in a row), while your finger, present for
       dozens of readings, passes easily.</p>
+      <pre class="info-diagram">readings above the threshold, in a row (debounce on = 3):
+noise spike   X . . .          only 1  -> dropped
+real finger   X X X X X ...    3rd one -> ON</pre>
       <p><b>Symptom &rarr; fix:</b> phantom clicks while nobody touches the
       glass &rarr; raise <b>on</b> to 2-4 to smooth them out; <b>cost:</b> each
       step delays a real press (~3&nbsp;ms per step, see below). A held press
@@ -719,9 +832,12 @@ const OPTION_HELP = {
       <b>CDT</b> (0-7) is how long. Together they scale every reading, touch and
       noise alike - so the <b>ratio</b> between a press and the noise barely
       changes.</p>
-      <p><b>Example</b> - press peaks at 40 with noise around 8. Double the
+      <p class="info-example"><b>Example</b> - press peaks at 40 with noise around 8. Double the
       gain: the press reads ~80, but noise reads ~16. Bigger numbers, same
       difficulty.</p>
+      <pre class="info-diagram">           press   noise   press/noise
+gain x1      40      8        5 : 1
+gain x2      80     16        5 : 1   same ratio, bigger numbers</pre>
       <p><b>Symptom &rarr; fix:</b> presses barely move the bar (peaks under
       ~20) &rarr; raise CDC a little. Readings look pinned at the top
       (saturated) &rarr; lower it. <b>After any change, re-run the thresholds</b>
@@ -734,6 +850,9 @@ const OPTION_HELP = {
       <p>Same idea as taking several photos and keeping the average instead of a
       single blurry shot. Three knobs, all with the same trade: cleaner signal,
       slower reaction.</p>
+      <pre class="info-diagram">electrode --> [ FFI avg ] --> [ SFI avg ] --> value read
+                    one sample every ESI ms
+     more averaging = smoother, but older, value</pre>
       <p><b>FFI</b> - readings averaged per sample (0=6, 1=10, 2=18, 3=34).<br>
       <b>SFI</b> - a second averaging pass (0=4, 1=6, 2=10, 3=18).<br>
       <b>ESI</b> - the wait between samples, 0=1&nbsp;ms up to 7=128&nbsp;ms.
@@ -759,14 +878,22 @@ const OPTION_HELP = {
       re-centred continuously: a zone neither creeps toward firing on its own,
       nor goes deaf over an evening. It is <b>frozen while a zone is held</b>,
       so a long press is never quietly swallowed.</p>
+      <pre class="info-diagram">filtered   902  901  898  903 ...  raw reading, wiggles
+baseline   900  900  900  900 ...  memorised rest reference
+delta        0    0    2    0 ...  stays ~0 until a real touch</pre>
       <p><b>This only chooses who keeps that zero up to date</b> - the touch
       decision (threshold, hysteresis, debounce) is <b>always</b> done by the
       firmware, in both modes.</p>
-      <p><b>Chip (MPR121)</b> - the sensor tracks its own zero and the firmware
-      reads it. Recommended: it is well tuned and costs nothing.<br>
-      <b>Firmware</b> - the firmware re-centres it itself, one step every
-      <i>rate</i> frames. Pick it only to control that speed yourself (lower
-      rate = re-centres faster).</p>
+      <p><b>Chip (MPR121)</b> - the sensor keeps that zero fresh itself, with
+      its proven built-in tracking; the firmware just reads the number.<br>
+      <b>Firmware</b> - the firmware maintains the very same number itself, one
+      step every <i>rate</i> frames.</p>
+      <p><b>In play you cannot tell them apart</b> - same delta, same presses,
+      same latency. The only real difference is maintenance: <b>Chip</b> runs at
+      a fixed, proven speed and costs nothing; <b>Firmware</b> lets you choose
+      the speed (<i>rate</i>) yourself. Keep <b>Chip</b>; switch only if the
+      resting reference ever behaves oddly (drifts weirdly, sticks after a
+      wiring change) and you want direct control over it.</p>
       <p>This is about slow drift, not speed: it does <b>not</b> change touch
       latency. <b>Set idle level</b> re-seeds the zero immediately - do it after
       moving the cabinet or changing the wiring, with nothing on the glass.</p>`,
@@ -786,10 +913,17 @@ const OPTION_HELP = {
       touched. <b>Higher = less sensitive.</b></p>
       <p>Every zone is its own little world: a big outer pad and a tiny centre
       pad do not answer with the same strength, so each gets its own number.</p>
-      <p><b>Example</b> - a zone rests around 5-10 and peaks at 120 when you
+      <p class="info-example"><b>Example</b> - a zone rests around 5-10 and peaks at 120 when you
       press it. A threshold of <b>40</b> sits well clear of the noise and well
       under the press. Too low (10) and it fires on its own; too high (110) and
       a quick tap is missed.</p>
+      <pre class="info-diagram">delta
+  120 . . . . . . press peak (held)
+   75 . . . . . . quick in-game tap only reaches here
+   40 ----------- threshold: above noise, well under the tap
+   10 ~~~~~~~~~~~ sustained noise stays below
+    0 ___________
+ too low (10) fires alone - too high (110) misses taps</pre>
       <p><b>The rule:</b> place it just above that zone's <b>sustained</b>
       noise, not above its rare spikes - then let <b>debounce</b> kill the
       spikes. That way the threshold stays low enough to catch a light, fast
@@ -803,7 +937,7 @@ const OPTION_HELP = {
       <p>From <b>0</b> (off) to <b>255</b> (full). It scales the button, cabinet
       and banner LEDs together - the game still chooses the colours, this only
       decides how bright they come out.</p>
-      <p><b>Example</b> - level 127 (the default) is half brightness: plenty
+      <p class="info-example"><b>Example</b> - level 127 (the default) is half brightness: plenty
       indoors, and it halves the current the LEDs draw.</p>
       <p>Lower it if the LEDs are dazzling or if the USB supply struggles.</p>`,
   },
@@ -2305,6 +2439,7 @@ els.logStatsJson.addEventListener('click', exportStatsJson);
 els.logRecord.addEventListener('click', clearLog);
 els.logSessionCsv.addEventListener('click', exportSessionCsv);
 els.logSessionJson.addEventListener('click', exportSessionJson);
+els.trigClear.addEventListener('click', clearLastTriggers);
 
 // --- Auto-calibration wizard -----------------------------------------------
 
@@ -2314,22 +2449,31 @@ els.logSessionJson.addEventListener('click', exportSessionJson);
 // nothing is written to flash on its own. All measurement is driven from the
 // render pipeline (calibFrame), active only while a measurement phase runs.
 
-const CALIB_NOISE_MS = 15000;    // standby noise window (untouched)
+const CALIB_NOISE_MS = 15000;    // final standby noise window (untouched)
 const CALIB_PRESS_TARGET = 3;    // prolonged presses that confirm a zone (auto)
+const CALIB_QUICK_TARGET = 5;    // brief taps in the quickfire sub-phase
 const CALIB_PRESS_HOLD = 5;      // frames a press must hold above the level (~200 ms)
 const CALIB_PRESS_MARGIN = 8;    // floor of the detection margin over noise
 const CALIB_MIN_MARGIN = 6;      // floor of the threshold margin over noise
 const CALIB_RISKY_GAP = 12;      // press within this of noise -> "risky"
-const CALIB_RISKY_MARGIN = 8;    // best-effort margin for a risky zone
+const CALIB_QUICK_RISKY_FRAC = 0.6;  // threshold above this fraction of quickfire -> risky
 
-// Step 4 (standby verify): a longer, more trustworthy noise watch that checks
-// the step-3 thresholds against real resting noise.
+// Step 1 auto-tune sequence timings (all one 'noise' phase, driven by timestamp).
+const CALIB_TUNE_REBASE_MS = 800;   // settle after the board reset (rebase)
+const CALIB_TUNE_NATIVE_MS = 8000;  // native-noise measurement window
+const CALIB_TUNE_SETTLE_MS = 500;   // settle after applying a trial parameter
+const CALIB_TUNE_TRIAL_MS = 6000;   // per-trial measurement window
+const CALIB_TUNE_IMPROVE = 0.2;     // worst noise must drop this fraction to keep a trial
+
+// Step 4 (standby verify): a longer, more trustworthy watch that counts real
+// firmware triggers (T lines) against the applied thresholds.
 const CALIB_VERIFY_MS = 60000;   // standby verify window
-const VERIFY_RAISE_MARGIN = 8;   // put a flagged threshold this far over noise
+const VERIFY_RAISE_MARGIN = 8;   // put a flagged threshold this far over noise/peak
 const VERIFY_LOWER_MIN_GAP = 6;  // only suggest lowering if it drops by this much
+const CALIB_REVERIFY_MAX = 6;    // cap on automatic re-verify passes
 
-// Recommended global parameters seeded into step 3 (editable there). Debounce
-// is the main anti-spike lever; the rest is a sane starting point.
+// Recommended global parameters seeded into step 3 when the step-1 auto-tune did
+// not run. Debounce is the main anti-spike lever; the rest is a sane start.
 const CALIB_PARAM_DEFAULTS = { debounceOn: 3, debounceOff: 3, avg: 2, hyst: 25 };
 
 const calib = {
@@ -2346,16 +2490,40 @@ const calib = {
   pressChips: [],       // one selectable chip per mapped zone
   pressPos: 0,          // position in pressOrder of the targeted zone
   pressZone: -1,        // targeted zone index
-  pressMax: 0,          // strongest delta in the current session
+  pressMax: 0,          // strongest delta in the current session (firm press)
   pressCount: 0,        // completed prolonged presses this session
   pressHeld: 0,         // frames held above the detection level
   pressInPress: false,  // a hold has been confirmed, awaiting release
+  pressSub: 'long',     // 'long' (firm presses) | 'quick' (brief taps)
+  quickfire: new Array(N_Z).fill(null),   // median of the brief-tap peaks per zone
+  quickCount: 0,        // taps counted in the current quick sub-phase
+  quickPeaks: [],       // per-tap peaks in the current quick sub-phase
+  quickInTap: false,    // a tap is in progress (delta above the level)
+  quickTapPeak: 0,      // strongest delta in the current tap
   advanceMode: 'auto',  // 'auto' | 'manual'
   paramInputs: {},      // editable param fields, built once
-  verifyCeil: new Array(N_Z).fill(0),   // noise ceiling over the verify window
-  verifyTrig: new Array(N_Z).fill(0),   // times noise reached the candidate thr
+  mapAlertE: -1,        // electrode flagged as answering for another zone (-1 none)
+  verifyCeil: new Array(N_Z).fill(0),   // delta ceiling over the verify window
+  verifyTrig: new Array(N_Z).fill(0),   // real firmware triggers (T) during verify
+  verifyPeak: new Array(N_Z).fill(0),   // strongest T peak during verify
   verifyEndsAt: 0,
-  verifyAdjust: [],     // pending {zone,current,suggested,dir,reason}
+  verifyAdjust: [],     // pending {zone,current,suggested,dir,reason,warn}
+  reverify: { active: false, pass: 0 }, // Apply & re-verify loop state
+  // Step-1 auto-tune. `saved` holds the globals to restore on cancel; `tuned`
+  // (once measured) seeds the step-3 recommended parameters.
+  tune: {
+    step: 'idle',       // idle|rebase|native|settle|trial|final|done
+    until: 0,
+    peak: new Array(N_Z).fill(0),
+    samples: Array.from({ length: N_Z }, () => []),
+    cur: { avg: 1, debounceOn: 1 },
+    best: Infinity,
+    trials: [],
+    trialIdx: 0,
+    pending: null,
+  },
+  tuneSaved: null,      // { avg, debounceOn, debounceOff, latency } or null
+  tuned: null,          // { avg, debounceOn, debounceOff, hyst } or null
 };
 
 // Calibration DOM, kept local so the shared els object stays focused.
@@ -2366,6 +2534,14 @@ const cel = {
   noiseProgress: document.getElementById('calib-noise-progress'),
   noiseBar: document.getElementById('calib-noise-bar'),
   noiseCount: document.getElementById('calib-noise-count'),
+  console: document.getElementById('calib-console'),
+  traceAllWrap: document.getElementById('calib-trace-all-wrap'),
+  traceAll: document.getElementById('calib-trace-all'),
+  pressTrace: document.getElementById('calib-press-trace'),
+  sound: document.getElementById('calib-sound'),
+  mapAlert: document.getElementById('calib-map-alert'),
+  mapAlertText: document.getElementById('calib-map-alert-text'),
+  mapAlertRemap: document.getElementById('calib-map-alert-remap'),
   pressInstr: document.getElementById('calib-press-instr'),
   advAuto: document.getElementById('calib-adv-auto'),
   advManual: document.getElementById('calib-adv-manual'),
@@ -2383,6 +2559,7 @@ const cel = {
   stop: document.getElementById('calib-stop'),
   resultRows: document.getElementById('calib-result-rows'),
   params: document.getElementById('calib-params'),
+  paramsOrigin: document.getElementById('calib-params-origin'),
   toVerify: document.getElementById('calib-to-verify'),
   toProfile: document.getElementById('calib-to-profile'),
   verifyStart: document.getElementById('calib-verify-start'),
@@ -2393,7 +2570,11 @@ const cel = {
   verifyResults: document.getElementById('calib-verify-results'),
   verifySummary: document.getElementById('calib-verify-summary'),
   verifyRows: document.getElementById('calib-verify-rows'),
+  verifyAdjustActions: document.getElementById('calib-verify-adjust-actions'),
+  verifyTable: document.getElementById('calib-verify-table'),
   verifyApply: document.getElementById('calib-verify-apply'),
+  verifyReverify: document.getElementById('calib-verify-reverify'),
+  verifyRecheck: document.getElementById('calib-verify-recheck'),
   verifyToProfile: document.getElementById('calib-verify-to-profile'),
   profileForm: document.getElementById('calib-profile-form'),
   profileName: document.getElementById('calib-profile-name'),
@@ -2411,7 +2592,9 @@ function calibPercentile(samples, p) {
 }
 
 // Show one wizard step, hide the rest, and light its marker in the step list.
+let calibVisibleStep = 1;
 function calibShowStep(step) {
+  calibVisibleStep = step;
   document.querySelectorAll('.calib-step').forEach((el) => {
     el.hidden = Number(el.dataset.step) !== step;
   });
@@ -2422,13 +2605,108 @@ function calibShowStep(step) {
   });
 }
 
-// Clear every measurement and return to the idle first step.
+// --- Wizard sound and action log -------------------------------------------
+
+// Beeps (Web Audio) and spoken zone names, both optional. The AudioContext is
+// created lazily on the first user gesture (the Start button, the toggle) so an
+// autoplay policy never silently blocks it.
+const CALIB_SOUND_KEY = 'maipico-calib-sound';
+let calibSoundOn = storageGet(CALIB_SOUND_KEY) !== '0';   // default on
+let calibAudioCtx = null;
+
+function calibAudio() {
+  if (!calibSoundOn) return null;
+  if (!calibAudioCtx) {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return null;
+    try { calibAudioCtx = new Ctx(); } catch { return null; }
+  }
+  if (calibAudioCtx.state === 'suspended') calibAudioCtx.resume().catch(() => {});
+  return calibAudioCtx;
+}
+
+function calibBeep(freq = 880, dur = 0.06) {
+  const ctx = calibAudio();
+  if (!ctx) return;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = 'sine';
+  osc.frequency.value = freq;
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  const t0 = ctx.currentTime;
+  gain.gain.setValueAtTime(0.0001, t0);
+  gain.gain.exponentialRampToValueAtTime(0.2, t0 + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  osc.start(t0);
+  osc.stop(t0 + dur + 0.02);
+}
+
+// Two quick higher beeps: a zone is done.
+function calibBeepDone() {
+  calibBeep(1320, 0.07);
+  setTimeout(() => calibBeep(1660, 0.07), 90);
+}
+
+// Speak text; zone names are passed letter-then-digit ("A 1") so they read out
+// as "A one" rather than "A-teen".
+function calibSpeak(text) {
+  if (!calibSoundOn || !('speechSynthesis' in window)) return;
+  try {
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'en-US';   // zone names read in English whatever the browser locale
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(u);
+  } catch { /* speech unavailable, ignore */ }
+}
+
+const calibZoneSpeech = (name) => name.split('').join(' ');
+
+function calibSetSound(on) {
+  calibSoundOn = on;
+  storageSet(CALIB_SOUND_KEY, on ? '1' : '0');
+  cel.sound.classList.toggle('on', on);
+  cel.sound.textContent = on ? 'Sound on' : 'Sound off';
+  if (!on && 'speechSynthesis' in window) {
+    try { window.speechSynthesis.cancel(); } catch { /* ignore */ }
+  }
+}
+
+// Timestamped action log for the step-1 auto-tune console.
+function calibLogClear() {
+  cel.console.textContent = '';
+}
+
+function calibLog(message) {
+  const line = document.createElement('div');
+  line.className = 'calib-log-line';
+  line.textContent = `[${new Date().toTimeString().slice(0, 8)}] ${message}`;
+  cel.console.appendChild(line);
+  while (cel.console.childElementCount > 200) cel.console.removeChild(cel.console.firstChild);
+  cel.console.scrollTop = cel.console.scrollHeight;
+}
+
+// Restore the globals changed for native measurement. Called on cancel; a
+// normal finish keeps the tuned values live (they are what we recommend).
+function calibRestoreGlobals() {
+  const s = calib.tuneSaved;
+  if (!s) return;
+  send(`avg ${s.avg}`);
+  send(`debounce ${s.debounceOn} ${s.debounceOff}`);
+  send(`latency ${s.latency}`);
+  calib.tuneSaved = null;
+}
+
+// Clear every measurement and return to the idle first step. Does NOT touch the
+// board (see calibRestoreGlobals) or the saved globals, so an internal reset in
+// the middle of the wizard cannot lose the originals.
 function calibReset() {
   calib.phase = 'idle';
   calib.noiseCeil.fill(0);
   calib.noiseP95.fill(0);
   calib.noiseSamples.forEach((arr) => { arr.length = 0; });
   calib.pressPeak.fill(null);
+  calib.quickfire.fill(null);
   calib.threshold.fill(0);
   calib.status.fill('kept');
   calib.pressState.fill('pending');
@@ -2440,61 +2718,245 @@ function calibReset() {
   calib.pressCount = 0;
   calib.pressHeld = 0;
   calib.pressInPress = false;
+  calib.pressSub = 'long';
+  calib.quickCount = 0;
+  calib.quickPeaks = [];
+  calib.quickInTap = false;
+  calib.quickTapPeak = 0;
+  calib.mapAlertE = -1;
   calib.verifyCeil.fill(0);
   calib.verifyTrig.fill(0);
+  calib.verifyPeak.fill(0);
   calib.verifyAdjust = [];
+  calib.reverify.active = false;
+  calib.reverify.pass = 0;
+  calib.tuned = null;
+  calibResetTune();
   cel.zoneStrip.textContent = '';
   cel.noiseProgress.hidden = true;
   cel.noiseStart.disabled = false;
+  cel.mapAlert.hidden = true;
   cel.verifyProgress.hidden = true;
   cel.verifyResults.hidden = true;
   cel.verifyStart.disabled = false;
+  calibPressBuffer.length = 0;
   setHoldProgress(cel.noiseBar, 0);
   setHoldProgress(cel.verifyBar, 0);
   calibSetAdvance('auto');
   calibShowStep(1);
 }
 
+function calibResetTune() {
+  const t = calib.tune;
+  t.step = 'idle';
+  t.until = 0;
+  t.peak.fill(0);
+  t.samples.forEach((a) => { a.length = 0; });
+  t.cur = { avg: 1, debounceOn: 1 };
+  t.best = Infinity;
+  t.trials = [];
+  t.trialIdx = 0;
+  t.pending = null;
+  cel.console.textContent = '';
+  cel.console.hidden = true;
+  cel.traceAllWrap.hidden = true;
+}
+
 function calibStop() {
   const wasMeasuring = calib.phase === 'noise' || calib.phase === 'press'
     || calib.phase === 'verify';
+  calibRestoreGlobals();
   calibReset();
   if (wasMeasuring) notify('Calibration stopped, measurements discarded', 'warn');
 }
 
-// --- Step 1: noise ---------------------------------------------------------
+// --- Step 1: reset, native noise, auto-tune --------------------------------
+
+// The whole step-1 sequence runs under phase 'noise', dispatched by tune.step
+// from calibNoiseFrame on a wall-clock timer. It resets the board, measures the
+// native noise, tries a few reactivity-first parameter changes, and ends with a
+// long final noise pass that fixes each zone's floor.
 
 function calibStartNoise() {
   if (!config) { notify('Connect the board before calibrating', 'warn'); return; }
   calibReset();
+  calibAudio();   // unlock audio on this user gesture
   calib.phase = 'noise';
-  calib.noiseEndsAt = performance.now() + CALIB_NOISE_MS;
+  // Save the globals to restore on cancel (only if not already saved by a run
+  // still in progress, so the true originals survive a re-run).
+  if (!calib.tuneSaved) {
+    calib.tuneSaved = {
+      avg: config.avg,
+      debounceOn: config.debounceOn,
+      debounceOff: config.debounceOff,
+      latency: config.latency,
+    };
+  }
+  cel.console.hidden = false;
+  cel.traceAllWrap.hidden = false;
   cel.noiseProgress.hidden = false;
   cel.noiseStart.disabled = true;
-  cel.noiseCount.textContent = `${(CALIB_NOISE_MS / 1000).toFixed(0)} s left - do not touch the panel`;
-  setHoldProgress(cel.noiseBar, 0);
+  calibLogClear();
+  calibLog('reset board (rebase)');
+  send('rebase');
+  calibTuneEnter('rebase', CALIB_TUNE_REBASE_MS);
+}
+
+const CALIB_TUNE_WINDOW = {
+  rebase: CALIB_TUNE_REBASE_MS,
+  native: CALIB_TUNE_NATIVE_MS,
+  settle: CALIB_TUNE_SETTLE_MS,
+  trial: CALIB_TUNE_TRIAL_MS,
+  final: CALIB_NOISE_MS,
+};
+
+function calibTuneEnter(step, ms) {
+  calib.tune.step = step;
+  calib.tune.until = performance.now() + ms;
+}
+
+function calibTuneResetWindow() {
+  calib.tune.peak.fill(0);
+  calib.tune.samples.forEach((a) => { a.length = 0; });
+}
+
+// Worst (highest) per-zone peak across all mapped zones in the current window.
+function calibTuneWorst() {
+  let worst = 0;
+  let zone = -1;
+  for (let z = 0; z < N_Z; z += 1) {
+    if (zoneToElectrode[z] < 0) continue;
+    if (calib.tune.peak[z] > worst) { worst = calib.tune.peak[z]; zone = z; }
+  }
+  return { worst, zone };
+}
+
+function calibTuneStatusText(step, remaining) {
+  const secs = Math.ceil(remaining / 1000);
+  if (step === 'rebase') return 'resetting the board...';
+  if (step === 'native') return `measuring native noise - ${secs} s`;
+  if (step === 'settle') return 'applying parameter...';
+  if (step === 'trial') return `testing a parameter - ${secs} s`;
+  return `${secs} s left - do not touch the panel`;
 }
 
 function calibNoiseFrame(data) {
+  const t = calib.tune;
+  // Every mapped zone, no active-exclusion: during the whole sequence nothing is
+  // touched, so any activity is noise we must see.
   for (let z = 0; z < N_Z; z += 1) {
     const e = zoneToElectrode[z];
-    if (e < 0 || data.zonesActive[z]) continue;   // only untouched zones
+    if (e < 0) continue;
     const delta = data.deltas[e];
-    if (delta > calib.noiseCeil[z]) calib.noiseCeil[z] = delta;
-    calib.noiseSamples[z].push(delta);
+    if (delta > t.peak[z]) t.peak[z] = delta;
+    if (t.step === 'final') t.samples[z].push(delta);
   }
   const now = performance.now();
-  const remaining = Math.max(0, calib.noiseEndsAt - now);
-  setHoldProgress(cel.noiseBar, 1 - remaining / CALIB_NOISE_MS);
-  cel.noiseCount.textContent = `${Math.ceil(remaining / 1000)} s left - do not touch the panel`;
-  if (now >= calib.noiseEndsAt) calibFinishNoise();
+  const remaining = Math.max(0, t.until - now);
+  const window = CALIB_TUNE_WINDOW[t.step] || 1;
+  setHoldProgress(cel.noiseBar, 1 - remaining / window);
+  cel.noiseCount.textContent = calibTuneStatusText(t.step, remaining);
+  if (now < t.until) return;
+  calibTuneAdvance();
 }
 
-function calibFinishNoise() {
-  for (let z = 0; z < N_Z; z += 1) {
-    calib.noiseP95[z] = calibPercentile(calib.noiseSamples[z], 0.95);
-    calib.noiseSamples[z].length = 0;   // free the samples, ceilings are kept
+// Move the auto-tune to its next stage once the current window elapsed.
+function calibTuneAdvance() {
+  const t = calib.tune;
+  if (t.step === 'rebase') {
+    send('avg 1');
+    calibLog(`edit param avg: ${calib.tuneSaved.avg} → 1`);
+    send('debounce 1 3');
+    calibLog(`edit param debounce_on: ${calib.tuneSaved.debounceOn} → 1`);
+    send('latency 0');
+    if (calib.tuneSaved.latency !== 0) calibLog(`edit param latency: ${calib.tuneSaved.latency} → 0`);
+    t.cur = { avg: 1, debounceOn: 1 };
+    calibTuneResetWindow();
+    calibTuneEnter('native', CALIB_TUNE_NATIVE_MS);
+    return;
   }
+  if (t.step === 'native') {
+    const { worst, zone } = calibTuneWorst();
+    t.best = worst;
+    calibLog(`checking noise → worst ${zone >= 0 ? zones[zone] : '-'}=${worst}`);
+    t.trials = [
+      { param: 'avg', label: 'avg', value: 2 },
+      { param: 'avg', label: 'avg', value: 3 },
+      { param: 'debounceOn', label: 'debounce_on', value: 2 },
+    ];
+    t.trialIdx = 0;
+    calibTuneStartTrial();
+    return;
+  }
+  if (t.step === 'settle') {
+    calibTuneResetWindow();
+    calibTuneEnter('trial', CALIB_TUNE_TRIAL_MS);
+    return;
+  }
+  if (t.step === 'trial') {
+    calibTuneEvalTrial();
+    return;
+  }
+  if (t.step === 'final') {
+    calibTuneFinish();
+  }
+}
+
+function calibTuneSetCmd(tr) {
+  if (tr.param === 'avg') return `avg ${tr.value}`;
+  return `debounce ${tr.value} 3`;
+}
+
+function calibTuneStartTrial() {
+  const t = calib.tune;
+  if (t.trialIdx >= t.trials.length) {
+    calibLog('final noise measurement (15 s) - do not touch the panel');
+    calibTuneResetWindow();
+    calibTuneEnter('final', CALIB_NOISE_MS);
+    return;
+  }
+  const tr = t.trials[t.trialIdx];
+  t.pending = tr;
+  const before = tr.param === 'avg' ? t.cur.avg : t.cur.debounceOn;
+  if (tr.value <= before) {   // already at/above this value, nothing to try
+    t.trialIdx += 1;
+    calibTuneStartTrial();
+    return;
+  }
+  calibLog(`edit param ${tr.label}: ${before} → ${tr.value}`);
+  send(calibTuneSetCmd(tr));
+  calibTuneEnter('settle', CALIB_TUNE_SETTLE_MS);
+}
+
+function calibTuneEvalTrial() {
+  const t = calib.tune;
+  const tr = t.pending;
+  const { worst } = calibTuneWorst();
+  const before = tr.param === 'avg' ? t.cur.avg : t.cur.debounceOn;
+  if (worst <= t.best * (1 - CALIB_TUNE_IMPROVE)) {
+    t.best = worst;
+    if (tr.param === 'avg') t.cur.avg = tr.value; else t.cur.debounceOn = tr.value;
+    calibLog(`checking noise → max ${worst}; clearly quieter - keeping ${tr.label} ${tr.value}`);
+  } else {
+    // Revert to the retained value: reactivity wins ties.
+    if (tr.param === 'avg') send(`avg ${t.cur.avg}`);
+    else send(`debounce ${t.cur.debounceOn} 3`);
+    calibLog(`checking noise → max ${worst}; not much difference; we prefer reactivity - keeping ${tr.label} ${before}`);
+  }
+  t.trialIdx += 1;
+  calibTuneStartTrial();
+}
+
+function calibTuneFinish() {
+  const t = calib.tune;
+  for (let z = 0; z < N_Z; z += 1) {
+    calib.noiseCeil[z] = t.peak[z];
+    calib.noiseP95[z] = calibPercentile(t.samples[z], 0.95);
+    t.samples[z].length = 0;
+  }
+  calib.tuned = { avg: t.cur.avg, debounceOn: t.cur.debounceOn, debounceOff: 3, hyst: 25 };
+  calibLog(`done - kept avg ${t.cur.avg}, debounce_on ${t.cur.debounceOn}`);
+  t.step = 'done';
   cel.noiseProgress.hidden = true;
   calibStartPress();
 }
@@ -2561,6 +3023,12 @@ function calibResetZoneSession() {
   calib.pressCount = 0;
   calib.pressHeld = 0;
   calib.pressInPress = false;
+  calib.pressSub = 'long';
+  calib.quickCount = 0;
+  calib.quickPeaks = [];
+  calib.quickInTap = false;
+  calib.quickTapPeak = 0;
+  calibPressBuffer.length = 0;
   cel.pressMax.textContent = '0';
   cel.pressCount.textContent = `0 / ${CALIB_PRESS_TARGET}`;
   setHoldProgress(cel.pressBar, 0);
@@ -2571,12 +3039,38 @@ function calibGoTo(pos) {
   calib.pressPos = pos;
   calib.pressZone = calib.pressOrder[pos];
   calibResetZoneSession();
+  calibClearMapAlert();
   cel.pressZone.textContent = zones[calib.pressZone];
   cel.pressProgress.textContent = `Zone ${pos + 1} of ${calib.pressOrder.length}`;
   cel.pressInstr.textContent =
     `Press and release ${zones[calib.pressZone]} firmly, at your own pace.`;
   cel.pressPrev.disabled = pos === 0;
   calibRenderZoneStrip();
+  calibSpeak(calibZoneSpeech(zones[calib.pressZone]));
+}
+
+const calibMedian = (arr) => {
+  if (!arr.length) return null;
+  const s = [...arr].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2);
+};
+
+// After the firm presses, the same session records five brief taps (a delta
+// crossing the level then falling, no hold). The median tap peak is the zone's
+// "quickfire" - the real in-game gesture the threshold must stay under.
+function calibEnterQuick() {
+  calibRecordPress();   // lock the firm-press peak before the taps
+  calib.pressSub = 'quick';
+  calib.quickCount = 0;
+  calib.quickPeaks = [];
+  calib.quickInTap = false;
+  calib.quickTapPeak = 0;
+  cel.pressInstr.textContent =
+    `Now tap ${zones[calib.pressZone]} briefly ${CALIB_QUICK_TARGET} times (about once per second).`;
+  cel.pressCount.textContent = `0 / ${CALIB_QUICK_TARGET} taps`;
+  setHoldProgress(cel.pressBar, 0);
+  calibSpeak('quick taps');
 }
 
 // Commit the current session's peak, but only when a press actually happened,
@@ -2603,48 +3097,161 @@ function calibAdvance() {
   calibGoTo(calib.pressPos + 1);
 }
 
+// The detection level a delta must clear to count as a press or tap on a zone.
+function calibPressLevel(z) {
+  return calib.noiseCeil[z]
+    + Math.max(CALIB_PRESS_MARGIN, Math.round(0.5 * calib.noiseCeil[z]));
+}
+
 function calibPressFrame(data) {
   const z = calib.pressZone;
   const e = zoneToElectrode[z];
   if (e < 0) return;
   const delta = data.deltas[e];
+
+  // Per-zone trace buffer for the wizard's targeted-zone trace.
+  calibPressBuffer.push(delta);
+  while (calibPressBuffer.length > SPARK_LEN) calibPressBuffer.shift();
+
   if (delta > calib.pressMax) {
     calib.pressMax = delta;
     cel.pressMax.textContent = delta;
   }
-  // Prolonged-press detection, independent of the current threshold: the delta
-  // rises a clear margin above the zone's measured noise (or the firmware calls
-  // the zone active), holds CALIB_PRESS_HOLD frames, then falls back below the
-  // level -> one counted press.
-  const level = calib.noiseCeil[z]
-    + Math.max(CALIB_PRESS_MARGIN, Math.round(0.5 * calib.noiseCeil[z]));
-  if (delta >= level || data.zonesActive[z]) {
-    calib.pressHeld += 1;
-    if (calib.pressHeld >= CALIB_PRESS_HOLD) calib.pressInPress = true;
+
+  const level = calibPressLevel(z);
+  if (calib.pressSub === 'long') {
+    // Prolonged-press detection: the delta rises a clear margin above the zone's
+    // measured noise (or the firmware calls it active), holds CALIB_PRESS_HOLD
+    // frames, then falls back below the level -> one counted press.
+    if (delta >= level || data.zonesActive[z]) {
+      calib.pressHeld += 1;
+      if (calib.pressHeld >= CALIB_PRESS_HOLD) calib.pressInPress = true;
+    } else {
+      if (calib.pressInPress) {
+        calib.pressCount += 1;
+        calibBeep();
+        cel.pressCount.textContent = `${calib.pressCount} / ${CALIB_PRESS_TARGET}`;
+        setHoldProgress(cel.pressBar, calib.pressCount / CALIB_PRESS_TARGET);
+        if (calib.advanceMode === 'auto' && calib.pressCount >= CALIB_PRESS_TARGET) {
+          calibEnterQuick();
+          calibCheckMapping(data, z);
+          return;
+        }
+      }
+      calib.pressHeld = 0;
+      calib.pressInPress = false;
+    }
   } else {
-    if (calib.pressInPress) {
-      calib.pressCount += 1;
-      cel.pressCount.textContent = `${calib.pressCount} / ${CALIB_PRESS_TARGET}`;
-      setHoldProgress(cel.pressBar, calib.pressCount / CALIB_PRESS_TARGET);
-      if (calib.advanceMode === 'auto' && calib.pressCount >= CALIB_PRESS_TARGET) {
+    // Quick taps: a delta crossing the level then falling, no hold requirement.
+    if (delta >= level) {
+      calib.quickInTap = true;
+      if (delta > calib.quickTapPeak) calib.quickTapPeak = delta;
+    } else if (calib.quickInTap) {
+      calib.quickPeaks.push(calib.quickTapPeak);
+      calib.quickCount += 1;
+      calibBeep();
+      calib.quickInTap = false;
+      calib.quickTapPeak = 0;
+      cel.pressCount.textContent = `${calib.quickCount} / ${CALIB_QUICK_TARGET} taps`;
+      setHoldProgress(cel.pressBar, calib.quickCount / CALIB_QUICK_TARGET);
+      if (calib.quickCount >= CALIB_QUICK_TARGET) {
+        calib.quickfire[z] = calibMedian(calib.quickPeaks);
+        calibBeepDone();
         calibRecordPress();
-        calibAdvance();
-        return;
+        if (calib.advanceMode === 'auto') { calibAdvance(); return; }
       }
     }
-    calib.pressHeld = 0;
-    calib.pressInPress = false;
   }
+
+  calibCheckMapping(data, z);
+}
+
+// Passive mapping check: if a pad other than the targeted one answers strongest
+// (above the level), flag it with a one-click remap. Non-blocking.
+function calibCheckMapping(data, z) {
+  if (!config) return;
+  const level = calibPressLevel(z);
+  const targetE = zoneToElectrode[z];
+  let strongE = -1;
+  let strongD = 0;
+  for (let e = 0; e < N_E; e += 1) {
+    if (config.map[e] === UNMAPPED) continue;
+    const d = data.deltas[e];
+    if (d > strongD) { strongD = d; strongE = e; }
+  }
+  // The correct pad answering clears any earlier alert.
+  if (targetE >= 0 && data.deltas[targetE] >= level
+    && (strongE === targetE || strongD < level)) {
+    calibClearMapAlert();
+    return;
+  }
+  if (strongE >= 0 && strongE !== targetE && strongD >= level) {
+    calibShowMapAlert(strongE);
+  }
+}
+
+function calibShowMapAlert(e) {
+  if (calib.mapAlertE === e) return;
+  calib.mapAlertE = e;
+  const zoneName = config.map[e] === UNMAPPED ? `E${e}` : zones[config.map[e]];
+  cel.mapAlertText.textContent = `Response detected on ${zoneName} - check mapping`;
+  cel.mapAlert.hidden = false;
+}
+
+function calibClearMapAlert() {
+  if (calib.mapAlertE === -1) return;
+  calib.mapAlertE = -1;
+  cel.mapAlert.hidden = true;
+}
+
+// Remap the flagged electrode to the currently targeted zone (same command the
+// Mapping tab sends), then dismiss the alert.
+function calibRemap() {
+  const e = calib.mapAlertE;
+  const z = calib.pressZone;
+  if (e < 0 || z < 0 || !config) return;
+  send(`touch ${Math.floor(e / PER_SENSOR)} ${e % PER_SENSOR} ${zones[z]}`);
+  notify(`${zones[z]} remapped to electrode ${e} (${sensorChannel(e)}) - Save to flash to keep it`, 'warn');
+  calibClearMapAlert();
+}
+
+// Trace of the targeted zone: delta, its threshold ON/OFF, and the step-1 noise
+// ceiling, drawn with the shared single-zone renderer.
+function drawCalibPressTrace() {
+  const canvas = cel.pressTrace;
+  if (!canvas) return;
+  const z = calib.pressZone;
+  if (calib.phase !== 'press' || z < 0 || !config) {
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    return;
+  }
+  const on = config.thr[z] || 0;
+  const off = Math.round(on * (1 - (config.hyst || 0) / 100));
+  drawSingleTrace(canvas, calibPressBuffer, [
+    { value: on, colour: '#ff5c5c' },     // threshold ON
+    { value: off, colour: '#ffb000' },    // threshold OFF
+    { value: calib.noiseCeil[z], colour: '#8a94a6' },  // noise ceiling
+  ], on * 1.6);
 }
 
 function calibFinishPress() {
   calib.phase = 'results';
+  calibClearMapAlert();
   calibComputeAll();
+  calibSeedParams();
   calibBuildResults();
   calibShowStep(3);
 }
 
 // --- Step 3: compute + review ----------------------------------------------
+
+// Threshold sits as low as possible just above the noise ceiling. A zone is
+// "risky" if its press barely clears the noise, or if the threshold lands too
+// close to the zone's real fast taps (would risk missing them in play).
+function calibThresholdFor(ceil) {
+  return clampThr(ceil + Math.max(CALIB_MIN_MARGIN, 0.3 * ceil));
+}
 
 function calibComputeAll() {
   for (let z = 0; z < N_Z; z += 1) {
@@ -2656,14 +3263,11 @@ function calibComputeAll() {
       continue;
     }
     const ceil = calib.noiseCeil[z];
-    const gap = peak - ceil;
-    if (gap < CALIB_RISKY_GAP) {
-      calib.status[z] = 'risky';
-      calib.threshold[z] = clampThr(ceil + CALIB_RISKY_MARGIN);
-    } else {
-      calib.status[z] = 'ok';
-      calib.threshold[z] = clampThr(ceil + Math.max(CALIB_MIN_MARGIN, 0.4 * gap));
-    }
+    const thr = calibThresholdFor(ceil);
+    calib.threshold[z] = thr;
+    const quick = calib.quickfire[z];
+    const closeToQuick = quick != null && thr > CALIB_QUICK_RISKY_FRAC * quick;
+    calib.status[z] = (peak - ceil < CALIB_RISKY_GAP || closeToQuick) ? 'risky' : 'ok';
   }
 }
 
@@ -2687,13 +3291,16 @@ function calibBuildResults() {
     const peak = document.createElement('td');
     peak.textContent = calib.pressPeak[z] === null ? '-' : calib.pressPeak[z];
 
+    const quick = document.createElement('td');
+    quick.textContent = calib.quickfire[z] == null ? '-' : calib.quickfire[z];
+
     const thr = document.createElement('td');
     thr.textContent = calib.threshold[z];
 
     const status = document.createElement('td');
     status.textContent = CALIB_STATUS_LABEL[calib.status[z]];
 
-    row.append(name, noise, peak, thr, status);
+    row.append(name, noise, peak, quick, thr, status);
     cel.resultRows.appendChild(row);
   }
 }
@@ -2722,11 +3329,23 @@ function calibBuildParams() {
   });
 }
 
-// Reset the editable parameters to the recommended defaults.
-function calibResetParams() {
-  Object.entries(CALIB_PARAM_DEFAULTS).forEach(([key, value]) => {
-    if (calib.paramInputs[key]) calib.paramInputs[key].value = value;
+// Seed the editable parameters from the step-1 auto-tune when it ran, otherwise
+// from the built-in defaults, and note which in the origin line.
+function calibSeedParams() {
+  const seed = calib.tuned || CALIB_PARAM_DEFAULTS;
+  Object.keys(calib.paramInputs).forEach((key) => {
+    const value = seed[key] != null ? seed[key] : CALIB_PARAM_DEFAULTS[key];
+    calib.paramInputs[key].value = value;
   });
+  cel.paramsOrigin.textContent = calib.tuned
+    ? 'Seeded from the step-1 auto-tune.'
+    : 'Default values (run step 1 to auto-tune these).';
+}
+
+// Reset the editable parameters (used by "Start over").
+function calibResetParams() {
+  calib.tuned = null;
+  calibSeedParams();
 }
 
 // --- Shared adjustment review (used by verify and live calibration) --------
@@ -2739,6 +3358,7 @@ function buildAdjustmentReview(tbody, adjustments) {
   adjustments.forEach((adj) => {
     const row = document.createElement('tr');
     row.classList.add(`adjust-${adj.dir}`);
+    if (adj.warn) row.classList.add('adjust-warn');
 
     const pick = document.createElement('td');
     const box = document.createElement('input');
@@ -2804,25 +3424,35 @@ function initAdjustmentToggles() {
 
 function calibStartVerify() {
   if (!config) { notify('Connect the board before verifying', 'warn'); return; }
+  // Apply the candidate thresholds live so the firmware's own triggers (T lines)
+  // reflect exactly what we are verifying.
+  for (let z = 0; z < N_Z; z += 1) {
+    if (zoneToElectrode[z] < 0) continue;
+    send(`thr ${zones[z]} ${calib.threshold[z]}`);
+    config.thr[z] = calib.threshold[z];
+  }
   calib.phase = 'verify';
   calib.verifyCeil.fill(0);
   calib.verifyTrig.fill(0);
+  calib.verifyPeak.fill(0);
   calib.verifyAdjust = [];
   calib.verifyEndsAt = performance.now() + CALIB_VERIFY_MS;
   cel.verifyResults.hidden = true;
   cel.verifyProgress.hidden = false;
   cel.verifyStart.disabled = true;
+  cel.verifyApply.disabled = false;
   setHoldProgress(cel.verifyBar, 0);
   cel.verifyCount.textContent = `${(CALIB_VERIFY_MS / 1000).toFixed(0)} s left - do not touch the panel`;
 }
 
+// Track the delta ceiling per zone (peaks are reliable now). Real triggers come
+// from the T queue, folded in by drainTriggerEvents.
 function calibVerifyFrame(data) {
   for (let z = 0; z < N_Z; z += 1) {
     const e = zoneToElectrode[z];
-    if (e < 0 || data.zonesActive[z]) continue;   // only untouched zones
+    if (e < 0) continue;
     const delta = data.deltas[e];
     if (delta > calib.verifyCeil[z]) calib.verifyCeil[z] = delta;
-    if (delta >= calib.threshold[z]) calib.verifyTrig[z] += 1;
   }
   const now = performance.now();
   const remaining = Math.max(0, calib.verifyEndsAt - now);
@@ -2831,32 +3461,44 @@ function calibVerifyFrame(data) {
   if (now >= calib.verifyEndsAt) calibFinishVerify();
 }
 
-// Compare the verified noise to the step-3 thresholds and derive per-zone
-// raise/lower suggestions.
+// Add a "may miss fast taps" caveat when a raised threshold lands too close to
+// the zone's known quickfire level.
+function calibVerifyWarn(z, suggested) {
+  const quick = calib.quickfire[z];
+  return quick != null && suggested > CALIB_QUICK_RISKY_FRAC * quick;
+}
+
+// Any real trigger (or noise reaching the threshold) is a false trigger to raise
+// above; otherwise headroom means the threshold can drop.
 function calibComputeVerify() {
   const adjust = [];
   for (let z = 0; z < N_Z; z += 1) {
     if (zoneToElectrode[z] < 0) continue;
     const cand = calib.threshold[z];
     const ceil = calib.verifyCeil[z];
-    if (calib.verifyTrig[z] > 0 || ceil >= cand) {
-      // Noise reached the threshold -> it would fire on its own. Lift it clear.
-      const suggested = clampThr(ceil + VERIFY_RAISE_MARGIN);
+    const trig = calib.verifyTrig[z];
+    const tpeak = calib.verifyPeak[z];
+    if (trig > 0 || ceil >= cand) {
+      const suggested = clampThr(Math.max(ceil, tpeak) + VERIFY_RAISE_MARGIN);
       if (suggested > cand) {
-        adjust.push({ zone: z, current: cand, suggested, dir: 'raise',
-          reason: `noise reached ${ceil} (${calib.verifyTrig[z]} hits)` });
+        const warn = calibVerifyWarn(z, suggested);
+        let reason = trig > 0
+          ? `${trig} false trigger(s), peak ${tpeak}`
+          : `noise reached ${ceil}`;
+        if (warn) reason += ' - may miss fast taps';
+        adjust.push({ zone: z, current: cand, suggested, dir: 'raise', reason, warn });
       }
       continue;
     }
-    // Headroom: the real resting noise sits well below the threshold. If a press
-    // peak is known, a threshold placed from this longer, truer noise floor may
-    // be meaningfully lower -> safe to drop.
+    // Headroom: the real resting noise sits well below the threshold.
     const peak = calib.pressPeak[z];
     if (peak === null) continue;
-    const ideal = clampThr(ceil + Math.max(CALIB_MIN_MARGIN, 0.4 * (peak - ceil)));
+    const ideal = calibThresholdFor(ceil);
     if (ideal <= cand - VERIFY_LOWER_MIN_GAP) {
-      adjust.push({ zone: z, current: cand, suggested: ideal, dir: 'lower',
-        reason: `noise only ${ceil}, room below ${cand}` });
+      const warn = calibVerifyWarn(z, ideal);
+      let reason = `noise only ${ceil}, room below ${cand}`;
+      if (warn) reason += ' - may miss fast taps';
+      adjust.push({ zone: z, current: cand, suggested: ideal, dir: 'lower', reason, warn });
     }
   }
   return adjust;
@@ -2867,12 +3509,37 @@ function calibFinishVerify() {
   cel.verifyProgress.hidden = true;
   cel.verifyStart.disabled = false;
   calib.verifyAdjust = calibComputeVerify();
+  const raises = calib.verifyAdjust.filter((a) => a.dir === 'raise');
+  const anyFalse = calib.verifyTrig.some((v) => v > 0) || raises.length > 0;
+
+  // Re-verify loop: apply the raises automatically and run another pass until a
+  // clean one, capped so it always terminates.
+  if (calib.reverify.active) {
+    if (anyFalse && calib.reverify.pass < CALIB_REVERIFY_MAX) {
+      calib.reverify.pass += 1;
+      raises.forEach((a) => { calib.threshold[a.zone] = a.suggested; });
+      applyAdjustmentsToBoard(raises.map((a) => ({ zone: a.zone, suggested: a.suggested })));
+      calibBuildResults();
+      notify(`Re-verify pass ${calib.reverify.pass}: raised ${raises.length} zone(s)`, 'warn');
+      calibStartVerify();
+      return;
+    }
+    calib.reverify.active = false;
+  }
+
   buildAdjustmentReview(cel.verifyRows, calib.verifyAdjust);
-  const raises = calib.verifyAdjust.filter((a) => a.dir === 'raise').length;
   const lowers = calib.verifyAdjust.filter((a) => a.dir === 'lower').length;
-  cel.verifySummary.textContent = calib.verifyAdjust.length === 0
-    ? 'No issues found - every threshold clears the resting noise with room to spare.'
-    : `${raises} zone(s) to raise (would fire on noise), ${lowers} to lower (extra headroom). Uncheck any you want to keep, then apply.`;
+  cel.verifySummary.textContent = !anyFalse && calib.verifyAdjust.length === 0
+    ? 'Clean pass - no false trigger in 60 s.'
+    : `${raises.length} zone(s) to raise (fired on their own), ${lowers} to lower (extra headroom). Uncheck any you want to keep, then apply.`;
+  // A clean pass has nothing to review or apply: strip the step down to
+  // "Continue to profile" plus an optional re-check.
+  const noAdjust = calib.verifyAdjust.length === 0;
+  cel.verifyAdjustActions.hidden = noAdjust;
+  cel.verifyTable.hidden = noAdjust;
+  cel.verifyApply.hidden = noAdjust;
+  cel.verifyReverify.hidden = noAdjust;
+  cel.verifyRecheck.hidden = !noAdjust;
   cel.verifyResults.hidden = false;
 }
 
@@ -2886,6 +3553,20 @@ function calibApplyVerify() {
   calibBuildResults();   // reflect new thresholds in the step-3 table
   notify(`Applied ${accepted.length} adjustment(s) - Save to flash to keep them`);
   cel.verifyApply.disabled = true;
+}
+
+// Apply the ticked raises, then re-run the 60 s window automatically, looping
+// until a clean pass.
+function calibApplyReverify() {
+  const accepted = collectAcceptedAdjustments(cel.verifyRows);
+  accepted.forEach(({ zone, suggested }) => { calib.threshold[zone] = suggested; });
+  if (accepted.length) {
+    applyAdjustmentsToBoard(accepted);
+    calibBuildResults();
+  }
+  calib.reverify.active = true;
+  calib.reverify.pass = 0;
+  calibStartVerify();
 }
 
 // --- Step 5: build + save the profile --------------------------------------
@@ -2909,7 +3590,19 @@ function calibCreateProfile() {
   const name = cel.profileName.value.trim() || `Auto-cal ${new Date().toLocaleString()}`;
   const list = loadProfiles();
   const existing = list.findIndex((p) => p.name === name);
-  const profile = { name, savedAt: new Date().toISOString(), config: cfg };
+  // Embed the per-zone measurements alongside the config, so the numbers behind
+  // the thresholds travel with the profile.
+  const profile = {
+    name,
+    savedAt: new Date().toISOString(),
+    config: cfg,
+    calib: {
+      noise: [...calib.noiseCeil],
+      p95: [...calib.noiseP95],
+      peak: [...calib.pressPeak],
+      quick: [...calib.quickfire],
+    },
+  };
 
   if (existing >= 0) {
     if (!window.confirm(`A profile named "${name}" already exists. Replace it?`)) return;
@@ -2921,6 +3614,10 @@ function calibCreateProfile() {
   renderProfiles();
   notify(`Profile "${name}" created from calibration`);
 
+  // The tuned globals are what the profile carries; keep them live and drop the
+  // restore point so leaving the wizard does not undo them.
+  calib.tuneSaved = null;
+
   if (cel.applyNow.checked) applyProfile(profile);
 }
 
@@ -2929,6 +3626,7 @@ function calibCreateProfile() {
 function calibFrame(data) {
   if (calib.phase !== 'noise' && calib.phase !== 'press' && calib.phase !== 'verify') return;
   if (!data.connected || !config) {
+    calib.tuneSaved = null;   // the board is gone; nothing to restore to
     calibReset();
     notify('Board disconnected - calibration stopped', 'warn');
     return;
@@ -2950,6 +3648,9 @@ function calibInit() {
   cel.noiseStart.addEventListener('click', calibStartNoise);
   cel.advAuto.addEventListener('click', () => calibSetAdvance('auto'));
   cel.advManual.addEventListener('click', () => calibSetAdvance('manual'));
+  calibSetSound(calibSoundOn);   // reflect the stored preference on the toggle
+  cel.sound.addEventListener('click', () => { calibAudio(); calibSetSound(!calibSoundOn); });
+  cel.mapAlertRemap.addEventListener('click', calibRemap);
   cel.pressPrev.addEventListener('click', () => {
     if (calib.phase !== 'press' || calib.pressPos === 0) return;
     calibRecordPress();
@@ -2975,12 +3676,14 @@ function calibInit() {
 
   const goToProfile = () => {
     cel.profileName.value = `Auto-cal ${new Date().toLocaleString()}`;
-    cel.applyNow.checked = false;
+    cel.applyNow.checked = true;
     calibShowStep(5);
   };
   // Results (step 3) -> standby verify (step 4).
   cel.toVerify.addEventListener('click', () => {
     calib.phase = 'results';
+    calib.reverify.active = false;
+    calib.reverify.pass = 0;
     cel.verifyResults.hidden = true;
     cel.verifyProgress.hidden = true;
     cel.verifyStart.disabled = false;
@@ -2993,6 +3696,8 @@ function calibInit() {
   cel.verifyStart.addEventListener('click', calibStartVerify);
   cel.verifySkip.addEventListener('click', goToProfile);
   cel.verifyApply.addEventListener('click', calibApplyVerify);
+  cel.verifyReverify.addEventListener('click', calibApplyReverify);
+  cel.verifyRecheck.addEventListener('click', calibStartVerify);
 
   cel.profileForm.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -3337,6 +4042,15 @@ function render(data) {
     els.console.scrollTop = els.console.scrollHeight;
   }
 
+  // Drain real triggers (T lines) every frame - collection never stops. The Last
+  // triggers list only repaints on the Live tab; the standby verify consumes them
+  // inside the drain.
+  drainTriggerEvents();
+  if (activeSection === 'live' && lastTrigDirty) {
+    lastTrigDirty = false;
+    renderLastTriggers();
+  }
+
   // Active-zone readout and disc highlight, from the firmware's own bitmap.
   if (activeSection === 'live') {
     const activeNames = [];
@@ -3428,7 +4142,7 @@ function render(data) {
   }
   if (activeSection === 'live') {
     drawSpark();
-    drawGlobalSpark();
+    drawGlobalSpark(els.sparkAll);
     updateLiveThr();   // keep the inline threshold in sync (skips while editing)
   }
 
@@ -3437,6 +4151,13 @@ function render(data) {
 
   // Advance the auto-calibration wizard while a measurement phase is running.
   calibFrame(data);
+
+  // Wizard traces reuse the Live renderers, gated on the visible calibration
+  // step (buffers already accumulated above).
+  if (activeSection === 'calibration') {
+    if (calibVisibleStep === 1) drawGlobalSpark(cel.traceAll);
+    else if (calibVisibleStep === 2) drawCalibPressTrace();
+  }
 
   // Live calibration observes real play whenever it is running.
   liveCalFrame(data);
@@ -3637,6 +4358,7 @@ function start() {
   activeSection = document.querySelector('.nav button.active')?.dataset.section || 'info';
   buildGlobalLegend();
   buildLogTable();
+  renderLastTriggers();
   updateRecordStatus();
   renderProfiles();
   calibInit();

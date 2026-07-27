@@ -70,6 +70,17 @@ static void disp_sense()
 
 static bool feeding = false;
 
+// Last trigger counts published as 'T' lines, one per zone. Snapshotted when the
+// feed turns on so no burst is emitted at startup.
+static uint32_t last_counts[34];
+
+static void feed_snapshot_counts()
+{
+    for (int z = 0; z < 34; z++) {
+        last_counts[z] = touch_count(z);
+    }
+}
+
 // Machine-readable sensitivity config for the monitor (one JSON line, tag 'C').
 // Built in one buffer and emitted in a single write: ~80 tiny printf calls at
 // 2 Hz used to hammer the USB stdio path from inside the 1 kHz loop.
@@ -846,13 +857,16 @@ static void handle_tweak(int argc, char *argv[])
     config_changed_and_show(disp_tweak);
 }
 
-// Machine data frame for the monitor (tag 'F'): 36 filtered, 36 delta, then the
-// active-zone bitmap as two 32-bit hex halves. Built in one buffer to keep it on
-// a single line and avoid flooding stdio with tiny writes.
+// Machine data frame for the monitor (tag 'F'): 36 filtered, 36 peak-hold delta,
+// then the active-zone bitmap as two 32-bit hex halves. The delta is the peak
+// held since the previous frame (the firmware decides at 1 kHz), so the monitor
+// sees the highest spike in the window instead of one 25 Hz sample -- no peak is
+// invisible. Built in one buffer to keep it on a single line and avoid flooding
+// stdio with tiny writes.
 static void feed_frame_line()
 {
     const uint16_t *filt = touch_filtered();
-    const int16_t *dlt = touch_deltas();
+    const int16_t *pk = touch_peaks();
     uint64_t zones = touch_touchmap();
 
     char line[560];
@@ -862,11 +876,39 @@ static void feed_frame_line()
         n += snprintf(line + n, sizeof(line) - n, " %d", filt[i]);
     }
     for (int i = 0; i < 36; i++) {
-        n += snprintf(line + n, sizeof(line) - n, " %d", dlt[i]);
+        n += snprintf(line + n, sizeof(line) - n, " %d", pk[i]);
     }
     snprintf(line + n, sizeof(line) - n, " %08lx%08lx\n",
              (uint32_t)(zones >> 32), (uint32_t)(zones & 0xffffffff));
     printf("%s", line);
+    touch_clear_peaks();
+}
+
+// One 'T <zone> <count> <peak>' line per zone whose firmware trigger count grew
+// since the previous poll. <peak> is the highest peak-hold delta across the
+// electrodes mapped to that zone. Read the peaks before feed_frame_line clears
+// them. Each line is a single write, which keeps it from interleaving with the
+// CLI echo (T lines are rare enough that per-line writes are fine).
+static void feed_trigger_lines()
+{
+    const int16_t *pk = touch_peaks();
+    for (int z = 0; z < 34; z++) {
+        uint32_t count = touch_count(z);
+        if (count <= last_counts[z]) {
+            continue;
+        }
+        int16_t pic = 0;
+        for (int ch = 0; ch < 36; ch++) {
+            if ((touch_key_from_channel(ch) == (unsigned)z) && (pk[ch] > pic)) {
+                pic = pk[ch];
+            }
+        }
+        char tline[32];
+        snprintf(tline, sizeof(tline), "\nT %d %d %d\n",
+                 z, (int)(count - last_counts[z]), pic);
+        printf("%s", tline);
+        last_counts[z] = count;
+    }
 }
 
 void commands_feed_poll()
@@ -888,6 +930,7 @@ void commands_feed_poll()
         return;
     }
     last = now;
+    feed_trigger_lines();
     feed_frame_line();
 }
 
@@ -934,6 +977,8 @@ static void handle_feed(int argc, char *argv[])
     }
     feeding = (match == 1);
     if (feeding) {
+        touch_clear_peaks();    // drop peaks accumulated while the feed was off
+        feed_snapshot_counts(); // avoid a burst of T lines at startup
         feed_publish_config();
     }
 }

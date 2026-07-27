@@ -139,7 +139,8 @@ button {
 }
 button:hover { border-color: var(--accent); }
 .primary { border-color: var(--ok); color: var(--ok); }
-.danger:hover { border-color: var(--hot); color: var(--hot); }
+.danger { border-color: var(--hot); color: var(--hot); }
+.danger:hover { background: var(--hot); border-color: var(--hot); color: #fff; }
 
 .actions { display: flex; flex-wrap: wrap; gap: 8px; }
 
@@ -515,7 +516,7 @@ button:hover { border-color: var(--accent); }
   color: var(--muted);
   line-height: 1.6;
   margin: 0 0 12px;
-  max-width: 72ch;
+  max-width: 100ch;
 }
 .info-content strong { color: var(--text); font-weight: 600; }
 .info-content em { color: var(--text); font-style: italic; }
@@ -537,6 +538,24 @@ button:hover { border-color: var(--accent); }
   overflow-x: auto;
 }
 
+/* "Example" call-outs: concrete numbers, set apart from the explanation. */
+.info-example {
+  display: block;
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: var(--well);
+  border-left: 3px solid var(--ok);
+  border-radius: 6px;
+  color: var(--muted);
+  max-width: 100ch;
+}
+.info-example > em:first-child,
+.info-example > b:first-child {
+  color: var(--ok);
+  font-style: normal;
+  font-weight: 600;
+}
+
 /* Call-out for the "do not confuse this with that" notes. */
 .info-warn {
   max-width: 72ch;
@@ -556,7 +575,7 @@ button:hover { border-color: var(--accent); }
   line-height: 1.6;
   margin: 0 0 14px;
   padding-left: 20px;
-  max-width: 72ch;
+  max-width: 100ch;
 }
 .info-content li { margin-bottom: 8px; }
 

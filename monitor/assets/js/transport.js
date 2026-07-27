@@ -25,6 +25,12 @@ const CONSOLE_LINES = 200;
 
 const ENCODER = new TextEncoder();
 
+// Real firmware triggers, decided at 1 kHz and reported as `T` lines at feed
+// poll. Parsed here and pushed as events; the render loop in monitor.js drains
+// this queue (Last triggers panel, and the standby verify). Kept in the
+// transport so all line parsing lives in one place.
+const triggerQueue = [];
+
 /** Append with a rolling cap - one definition of the log semantics. */
 const pushCapped = (list, item, cap) => [...list, item].slice(-cap);
 
@@ -98,6 +104,21 @@ function createParser(state, onUpdate) {
       if (elapsed > 0.5) state.rate = Math.round((frames / elapsed) * 10) / 10;
 
       onUpdate();
+      return;
+    }
+
+    // Real trigger: T <zoneIdx 0..33> <delta_count> <peak>. One per zone whose
+    // firmware trigger counter grew since the last poll. Malformed lines are
+    // dropped rather than allowed to poison the queue.
+    if (parts[0] === 'T' && parts.length === 4) {
+      const zone = Number(parts[1]);
+      const count = Number(parts[2]);
+      const peak = Number(parts[3]);
+      if (Number.isInteger(zone) && zone >= 0 && zone < N_ZONES
+        && Number.isFinite(count) && Number.isFinite(peak)) {
+        triggerQueue.push({ zone, count, peak, at: performance.now() });
+        onUpdate();
+      }
       return;
     }
 
