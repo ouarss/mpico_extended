@@ -144,6 +144,20 @@ button:hover { border-color: var(--accent); }
 
 .actions { display: flex; flex-wrap: wrap; gap: 8px; }
 
+/* --- Auto-save to disk (Logs) ------------------------------------------- */
+
+.autosave-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+}
+.autosave-status {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
 /* --- Bars ---------------------------------------------------------------- */
 
 .bar { height: 4px; background: var(--well); border-radius: 2px; overflow: hidden; }
@@ -545,7 +559,6 @@ button:hover { border-color: var(--accent); }
   padding: 8px 12px;
   background: var(--well);
   border-left: 3px solid var(--ok);
-  border-radius: 6px;
   color: var(--muted);
   max-width: 100ch;
 }

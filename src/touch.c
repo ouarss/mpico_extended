@@ -53,8 +53,6 @@ static uint16_t avg_hist[36][SENSE_AVG_MAX];
 static uint8_t avg_idx[3];
 
 static uint64_t touch_reading;
-static uint64_t delay_queue[SENSE_LATENCY_MAX + 1];
-static uint8_t delay_pos;
 
 static bool sensor_ok[3];
 
@@ -173,10 +171,6 @@ void touch_rebase()
         }
         avg_idx[m] = 0;
     }
-    for (int k = 0; k <= SENSE_LATENCY_MAX; k++) {
-        delay_queue[k] = 0;
-    }
-    delay_pos = 0;
     touch_reading = 0;
 }
 
@@ -314,11 +308,7 @@ void touch_update()
         }
     }
 
-    // Optional output latency (delay line). latency == 0 -> pass-through.
-    uint8_t depth = mai_cfg->sense.latency;
-    delay_queue[delay_pos] = zones;
-    delay_pos = (delay_pos + 1) % (depth + 1);
-    touch_reading = delay_queue[delay_pos];
+    touch_reading = zones;
 
     touch_stat();
 }

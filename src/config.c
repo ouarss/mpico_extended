@@ -29,7 +29,7 @@ static mai_cfg_t default_cfg = {
         .hysteresis = 25,
         .filter = 0x10,
         .avg = 2,
-        .latency = 0,
+        .reserved_latency = 0,
         .debounce_on = 1,   // near-instant press (low latency)
         .debounce_off = 3,  // stable hold; release latency matters less
         .baseline_mode = 0, // MPR121 hardware baseline (freezes while touched)
@@ -90,7 +90,6 @@ static bool sense_valid()
 {
     if (!in_range(mai_cfg->sense.hysteresis, 0, SENSE_HYST_MAX) ||
         !in_range(mai_cfg->sense.avg, SENSE_AVG_MIN, SENSE_AVG_MAX) ||
-        !in_range(mai_cfg->sense.latency, 0, SENSE_LATENCY_MAX) ||
         !in_range(mai_cfg->sense.debounce_on, 0, SENSE_DEBOUNCE_MAX) ||
         !in_range(mai_cfg->sense.debounce_off, 0, SENSE_DEBOUNCE_MAX) ||
         !in_range(mai_cfg->sense.baseline_mode, 0, 1) ||
@@ -112,6 +111,13 @@ static void config_loaded()
 {
     if (!sense_valid()) {
         mai_cfg->sense = default_cfg.sense;
+        config_changed();
+    }
+
+    // The latency feature was removed; this byte is reserved. Force it to 0 in
+    // case an old saved config carried a non-zero value.
+    if (mai_cfg->sense.reserved_latency != 0) {
+        mai_cfg->sense.reserved_latency = 0;
         config_changed();
     }
 

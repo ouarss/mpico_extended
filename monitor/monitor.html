@@ -201,11 +201,38 @@ delta = 900 - 815        0            85     0 at rest, RISES when touched</pre>
               spike lasting one reading never makes 3 in a row and is dropped; a
               finger, present for dozens of readings, passes. Each step costs
               ~3 ms (an electrode is re-read every 3rd frame).</span></li>
-            <li><strong>Latency</strong> &mdash; an optional extra hold, to line
-              the input up with a slower device.
-              <span class="info-example"><em>Example</em> &mdash; latency 3
-              reports a press ~3 ms later. It filters nothing; leave it at
-              0.</span></li>
+            <li><strong>Gain (CDC / CDT)</strong> &mdash; the sensor's measuring
+              drive: CDC is the current pushed into the electrode (uA), CDT how
+              long it is pushed. This is not a filter to minimise &mdash; it
+              powers the measurement itself: at 0 no charge is injected and
+              nothing is measured at all. 16 / 1 sit mid-range and put a typical
+              pad in the middle of the 0-1023 reading scale; auto-config then
+              trims the current per electrode.
+              <span class="info-example"><em>Example</em> &mdash; press peaks at
+              40 with noise around 8; double the gain and they read ~80 and ~16
+              &mdash; bigger numbers, same ratio. After any change, re-run the
+              thresholds (every number just moved).</span></li>
+            <li><strong>Filter (FFI / SFI / ESI)</strong> &mdash; the chip's own
+              smoothing, applied before the firmware ever reads the value: FFI
+              and SFI average several samples, ESI sets the wait between samples.
+              <span class="info-example"><em>Example</em> &mdash; 0 1 0 (default)
+              is light and responsive; 0 1 3 spreads the samples over more time
+              &mdash; good anti-noise for a noisy panel, with barely any added
+              lag.</span></li>
+            <li><strong>Baseline tracking</strong>: the resting reference, the
+              &laquo;&nbsp;zero&nbsp;&raquo; each electrode is measured against
+              (<code>delta = baseline - filtered</code>). It drifts slowly with
+              temperature, humidity and dust, so it is re-centred continuously;
+              re-centring <strong>freezes while a zone is held</strong>, so a
+              long press is never quietly swallowed. <em>Set idle level</em>
+              (<code>rebase</code>) retakes it at once.<br>
+              The Tuning tab picks who maintains it: <strong>Chip
+              (MPR121)</strong>, recommended (well tuned, free), or
+              <strong>Firmware</strong>, one step every <em>rate</em> frames,
+              only useful to control that speed yourself.
+              <span class="info-example"><em>Example</em>: filtered reads 902,
+              901, 898 while the memorised baseline stays 900: the delta stays
+              ~0 at rest, and only a real touch moves it.</span></li>
           </ol>
           <p class="info-warn"><strong>Averaging and Debounce are
             independent</strong> &mdash; one filters the <em>value</em>, the
@@ -218,26 +245,6 @@ delta = 900 - 815        0            85     0 at rest, RISES when touched</pre>
             have dropped it at avg&nbsp;1.<br><br>
             That is why the wizard keeps avg low and leans on debounce as the
             main anti-spike lever.</p>
-          <h3>The resting reference (baseline)</h3>
-          <p>The baseline is the &laquo;&nbsp;zero&nbsp;&raquo; each electrode is
-            measured against. It drifts slowly with temperature, humidity and
-            dust, so it is re-centred continuously &mdash; otherwise a zone would
-            slowly creep toward firing on its own, or go deaf.</p>
-          <p>Re-centring
-            <strong>freezes while a zone is held</strong>, so a long press is
-            never quietly swallowed.</p>
-          <p><em>Set idle level</em>
-            (<code>rebase</code>) retakes the reference immediately.</p>
-          <p>The Tuning tab lets you choose <strong>who keeps that zero up to
-            date</strong>:</p>
-          <ul class="info-steps">
-            <li><strong>Chip (MPR121)</strong> &mdash; the sensor tracks its own
-              zero and the firmware just reads it. Recommended: well tuned, and
-              free.</li>
-            <li><strong>Firmware</strong> &mdash; the firmware re-centres it
-              itself, one step every <em>rate</em> frames. Only useful to control
-              that speed yourself.</li>
-          </ul>
           <p class="info-warn"><strong>Not to be confused with the old
             detection.</strong><br><br>
             This choice only decides who maintains the
@@ -297,7 +304,7 @@ keeps the baseline fresh*  --->  compares to YOUR threshold
             and <strong>resting reference</strong> and decides for itself:
             <code>delta = baseline - filtered</code> against an
             <strong>absolute per-zone threshold</strong>, with a release margin,
-            a debounce count, optional averaging and latency.</p>
+            a debounce count and optional averaging.</p>
           <p>The MPR121 is still
             very much used &mdash; as a clean front-end (gain, filter) and as the
             keeper of the resting reference.</p>
@@ -518,6 +525,23 @@ noise       7  #                        -&gt; ignored, too small and too brief</
           <p><strong>Typical use:</strong> leave the cabinet alone for a few
             minutes, come back, and read the Triggers column. Any zone above zero
             needs a higher threshold (or more debounce).</p>
+          <h3>Auto-save to disk</h3>
+          <p>The Logs tab can also write every session straight to your disk, so
+            you never have to remember an export.</p>
+          <p>Pick a folder once with <strong>Choose folder</strong>. In the Chrome
+            prompt, tick <strong>Allow on every visit</strong>: the page then
+            keeps the folder across reloads and starts saving on its own, with no
+            further click.</p>
+          <p>Each visit writes one file, named for the moment it started. Files
+            are filed by date:
+            <code>&lt;folder&gt;/YYYY/MM/maipico-session-...csv</code>, one folder
+            per year, then per month. The file grows as the session runs: new
+            samples are appended about once a minute, and once more when the board
+            is unplugged or the page is closed.</p>
+          <p>If the browser forgets the permission (it may ask again after a
+            while), the Logs tab shows a paused state: click <strong>Choose
+            folder</strong> once to allow it again. <strong>Disable</strong> stops
+            auto-save and forgets the folder.</p>
         </article>
 
         <article data-topic="profiles">
@@ -572,7 +596,7 @@ noise       7  #                        -&gt; ignored, too small and too brief</
           <h3>Configuration &mdash; <code>C</code></h3>
           <p>Emitted on <code>feed on</code> and after every setting change:
             <code>C {json}</code>, carrying the per-zone thresholds, the mapping,
-            and every processing parameter (hyst, avg, latency, filter, gain,
+            and every processing parameter (hyst, avg, filter, gain,
             debounce, baseline mode, rate) plus the <code>saved</code> flag.</p>
           <h3>Commands</h3>
           <table class="cmd-table">
@@ -584,7 +608,6 @@ noise       7  #                        -&gt; ignored, too small and too brief</
               <tr class="cmd-group"><th colspan="2">Processing</th></tr>
               <tr><td><code>hyst &lt;0&ndash;90&gt;</code></td><td>Release margin, % of threshold</td></tr>
               <tr><td><code>avg &lt;1&ndash;16&gt;</code></td><td>Moving-average window (1 = off, lowest latency)</td></tr>
-              <tr><td><code>latency &lt;0&ndash;9&gt;</code></td><td>Output delay, frames</td></tr>
               <tr><td><code>debounce &lt;on&gt; [off]</code></td><td>Consecutive samples before ON / OFF</td></tr>
               <tr><td><code>filter &lt;ffi&gt; &lt;sfi&gt; &lt;esi&gt;</code></td><td>MPR121 hardware pre-filter</td></tr>
               <tr><td><code>gain &lt;cdc&gt; &lt;cdt&gt;</code></td><td>MPR121 charge current / time</td></tr>
@@ -925,6 +948,19 @@ noise       7  #                        -&gt; ignored, too small and too brief</
       <div class="actions">
         <button type="button" id="log-session-csv">Export session CSV</button>
         <button type="button" id="log-session-json">Export session JSON</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Auto-save to disk</h2>
+      <p class="hint">Write every session straight to a folder on this computer,
+        with no manual export. Choose a folder once: each visit creates one file
+        under <code>YYYY/MM/</code>, appended while the session runs. Needs Chrome
+        or Edge.</p>
+      <div class="autosave-bar">
+        <button type="button" id="autosave-choose" class="primary">Choose folder</button>
+        <button type="button" id="autosave-disable" hidden>Disable</button>
+        <span id="autosave-status" class="autosave-status">Off.</span>
       </div>
     </div>
   </section>

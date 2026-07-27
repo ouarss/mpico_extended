@@ -448,6 +448,21 @@ h2 .opt-info { margin-left: 6px; vertical-align: middle; }
   cursor: grab;
   user-select: none;
 }
+/* During a drag: the origin stays marked by a dashed ghost, and the chip being
+   moved is highlighted as the live drop preview (the row shifts around it). */
+.led-chip.led-slot {
+  border-style: dashed;
+  border-color: var(--muted);
+  background: transparent;
+  color: var(--muted);
+  opacity: 0.45;
+}
+.led-chip.dragging {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--well);
+  cursor: grabbing;
+}
 /* Console log: colour the typed command, put a clear separator before each
    command block, and dim the bare prompt lines the firmware echoes. */
 .log-cmd { color: var(--ok); font-weight: 600; }

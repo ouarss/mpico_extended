@@ -78,7 +78,19 @@ let editing = null;      // field being typed into, left untouched by refreshes
 // electrode index feeding each zone, derived from config.map on every refresh.
 let zoneToElectrode = new Array(N_Z).fill(-1);
 
+// Every monitor-side action (commands sent, user-facing notices) is journaled,
+// so an exported session also tells what was done right before an observation
+// (profile applied, threshold changed, calibration step...). Bounded ring.
+const ACTION_LOG_MAX = 2000;
+const actionLog = [];
+
+function logAction(kind, text) {
+  actionLog.push({ t: performance.now(), at: new Date().toISOString(), kind, text });
+  if (actionLog.length > ACTION_LOG_MAX) actionLog.shift();
+}
+
 function send(command) {
+  logAction('cmd', command);
   transport?.send(command);
 }
 
@@ -171,6 +183,9 @@ const els = {
   logRecDuration: document.getElementById('log-rec-duration'),
   logSessionCsv: document.getElementById('log-session-csv'),
   logSessionJson: document.getElementById('log-session-json'),
+  autosaveStatus: document.getElementById('autosave-status'),
+  autosaveChoose: document.getElementById('autosave-choose'),
+  autosaveDisable: document.getElementById('autosave-disable'),
   trigRows: document.getElementById('trig-rows'),
   trigClear: document.getElementById('trig-clear'),
 };
@@ -210,6 +225,7 @@ function updateConnectGate(force) {
 let toastTimer = null;
 
 function notify(message, tone = 'ok') {
+  logAction(tone === 'warn' ? 'warn' : 'note', message);
   els.toast.textContent = message;
   els.toast.className = `toast toast-${tone}`;
   els.toast.hidden = false;
@@ -542,6 +558,22 @@ function syncCanvasSize(canvas) {
   if (h > 0 && canvas.height !== h) canvas.height = h;
 }
 
+// Top-right peak badge, shared by the single-zone and all-zones traces. The
+// caller decides the text and colour; the callers keep their own visibility
+// guards (a zero peak draws nothing).
+function drawPeakBadge(ctx, w, text, colour) {
+  ctx.font = 'bold 11px system-ui, sans-serif';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'top';
+  const tw = ctx.measureText(text).width;
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+  ctx.fillRect(w - tw - 11, 2, tw + 8, 15);
+  ctx.fillStyle = colour;
+  ctx.fillText(text, w - 7, 4);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+}
+
 // Core single-zone sparkline: a delta buffer plus optional dashed reference
 // lines on a shared auto-scaled axis. Reused by the Live trace and the wizard's
 // per-zone press trace, so the drawing lives in exactly one place.
@@ -581,6 +613,9 @@ function drawSingleTrace(canvas, buffer, refLines, scaleFloor) {
   }
 
   drawYMax(ctx, w, h, scale);
+
+  // Live badge (top right): the tallest peak in the visible window.
+  if (peak > 0) drawPeakBadge(ctx, w, `peak ${Math.round(peak)}`, '#4ea1ff');
 }
 
 function drawSpark() {
@@ -635,13 +670,16 @@ function drawGlobalSpark(canvas) {
   const h = canvas.height;
   ctx.clearRect(0, 0, w, h);
 
-  let peak = 40;
-  for (const buf of allBuffers) {
-    for (const v of buf) {
-      if (v > peak) peak = v;
+  // Track the tallest peak in the visible window and whose zone it is: it sets
+  // the scale, and is shown live as a badge (top right).
+  let peakVal = 0;
+  let peakZone = -1;
+  for (let z = 0; z < N_Z; z += 1) {
+    for (const v of allBuffers[z]) {
+      if (v > peakVal) { peakVal = v; peakZone = z; }
     }
   }
-  const scale = peak * 1.1;
+  const scale = Math.max(40, peakVal) * 1.1;
   const y = (v) => h - (Math.min(v, scale) / scale) * (h - 8) - 4;
 
   for (let z = 0; z < N_Z; z += 1) {
@@ -659,6 +697,10 @@ function drawGlobalSpark(canvas) {
   }
 
   drawYMax(ctx, w, h, scale);
+
+  if (peakZone >= 0 && peakVal > 0) {
+    drawPeakBadge(ctx, w, `peak ${zones[peakZone]} ${Math.round(peakVal)}`, zoneColor(peakZone));
+  }
 }
 
 function buildGlobalLegend() {
@@ -682,11 +724,16 @@ const LAST_TRIG_MAX = 20;
 const lastTriggers = [];
 let lastTrigDirty = true;
 
+// Wall-clock HH:MM:SS stamp for the trigger list and the calibration console.
+function clockStamp() {
+  return new Date().toTimeString().slice(0, 8);
+}
+
 // Drain the transport's trigger queue once per frame: every event feeds the
 // Last-triggers list, and (while the standby verify runs) the verify counters.
 function drainTriggerEvents() {
   if (!triggerQueue.length) return;
-  const stamp = new Date().toTimeString().slice(0, 8);   // HH:MM:SS
+  const stamp = clockStamp();
   for (const ev of triggerQueue) {
     lastTriggers.unshift({
       zone: ev.zone,
@@ -788,20 +835,6 @@ avg 4         5    5   19   19    diluted: (5+6+60+5) / 4 = 19</pre>
       real added lag on <b>every</b> press. Prefer <b>debounce</b> first: it
       fights spikes without slowing a genuine press as much.</p>`,
   },
-  latency: {
-    title: 'Added delay (latency)',
-    body: `<p><b>In one line:</b> deliberately answer late. It filters nothing.</p>
-      <p>The decision is already made; this just sits on it for N frames before
-      telling the game. There is no upside for noise - it is a pure timing
-      offset, kept for the rare setup that needs the touch to line up with
-      something else.</p>
-      <p class="info-example"><b>Example</b> - latency 3: a press decided now is reported ~3&nbsp;ms
-      later. You lose 3&nbsp;ms and gain nothing else.</p>
-      <pre class="info-diagram">decision NOW --[ wait N frames ]--> reported to the game
-latency 0:  reported immediately  (keep this)</pre>
-      <p><b>Leave it at 0.</b> If a zone is jumpy, the answer is threshold,
-      debounce or averaging - never this.</p>`,
-  },
   debounce: {
     title: 'Debounce',
     body: `<p><b>In one line:</b> "say it twice and I'll believe you". A zone
@@ -828,6 +861,11 @@ real finger   X X X X X ...    3rd one -> ON</pre>
     title: 'Gain (CDC / CDT)',
     body: `<p><b>In one line:</b> the microphone volume of the sensor. Louder
       signal, but louder hiss too.</p>
+      <p>Why not 0? CDC/CDT are not something to minimise &mdash; they power the
+      measurement itself. At 0 no charge is injected and nothing is measured
+      (0 means &laquo; disabled &raquo; in the chip). 16 uA / 0.5 us sit
+      mid-range and give a healthy reading; auto-config then trims the current
+      per electrode.</p>
       <p><b>CDC</b> (0-63) is how much current is pushed into the electrode;
       <b>CDT</b> (0-7) is how long. Together they scale every reading, touch and
       noise alike - so the <b>ratio</b> between a press and the noise barely
@@ -956,7 +994,7 @@ delta        0    0    2    0 ...  stays ~0 until a real touch</pre>
       group.</p>`,
   },
   rgbmap: {
-    title: 'Button LED order',
+    title: "Button LED order (drag'n'drop)",
     body: `<p>Which physical LED on the chain lights each ring button. The chips
       are laid out along the chain - position <b>0</b> on the left to <b>7</b> on
       the right - and each shows the button (<b>B1-B8</b>) that position drives.</p>
@@ -988,9 +1026,10 @@ delta        0    0    2    0 ...  stays ~0 until a real touch</pre>
     title: 'Button polarity (active-high)',
     body: `<p><b>In one line:</b> tells the board whether a pressed button sends
       a <b>1</b> or a <b>0</b>.</p>
-      <p>Most switches pull the wire down when pressed (active-low, the default).
-      Some optical sensors do the opposite. <b>Main</b> covers the eight play
-      buttons, <b>Aux</b> the Test / Service / Navigate / Coin ones.</p>
+      <p>Most switches pull the wire down when pressed (active-low, the
+      default). Some optical sensors do the opposite.</p>
+      <p><b>Main</b> covers the eight play buttons.</p>
+      <p><b>Aux</b> covers the Test / Service / Navigate / Coin ones.</p>
       <p><b>Symptom:</b> a button reads as permanently held, or releases when you
       press it &rarr; flip the matching switch. Otherwise leave both off.</p>`,
   },
@@ -1011,7 +1050,6 @@ const OPTION_DEFAULTS = {
   threshold: 'just above each zone’s sustained noise (often 15-50 here)',
   hyst: '25%',
   avg: '2 (1 disables it)',
-  latency: '0 (no added delay)',
   debounce: 'on 1, off 3',
   gain: 'cdc 16, cdt 1',
   filter: 'ffi 0, sfi 1, esi 3 for a noisy panel (default 0 1 0)',
@@ -1101,8 +1139,6 @@ function buildProcessing() {
   procScalar('Averaging', 'avg', 1, 16,
     'Frames averaged before deciding. 1 disables it.', 'avg',
     (v) => (v > 1 ? `mean of ${v} frames` : 'off'));
-  procScalar('Added delay (latency)', 'latency', 0, 9,
-    'Holds the result back before sending it.', 'latency', null);
 
   procMulti('Debounce (frames)', 'debounce',
     'A change must hold this many frames to be accepted.',
@@ -1237,7 +1273,6 @@ function refreshProcessing(cfg) {
   const set = (input, value) => { if (input && input !== editing) input.value = value; };
   set(proc.hyst, cfg.hyst);
   set(proc.avg, cfg.avg);
-  set(proc.latency, cfg.latency);
   set(proc.debounceOn, cfg.debounceOn);
   set(proc.debounceOff, cfg.debounceOff);
   set(proc.gainCdc, cfg.gainCdc);
@@ -1314,7 +1349,7 @@ function rgbTargetOrder(cfg) {
 // Read the chips left-to-right (chain position 0..7) and send the mapping the
 // firmware expects: rgbmap[button] = the chain position that lights it.
 function commitRgbOrder() {
-  const chips = [...board.orderList.querySelectorAll('.led-chip')];
+  const chips = [...board.orderList.querySelectorAll('.led-chip:not(.led-slot)')];
   const rgbmap = new Array(8).fill(0);
   chips.forEach((chip, position) => { rgbmap[Number(chip.dataset.button)] = position; });
   send(`rgbmap ${rgbmap.join(' ')}`);
@@ -1324,7 +1359,7 @@ function commitRgbOrder() {
 // horizontal centre is to the right of the pointer, or null to append at the
 // end (pointer past every remaining chip).
 function chipBeforeX(list, x) {
-  const chips = [...list.querySelectorAll('.led-chip:not(.dragging)')];
+  const chips = [...list.querySelectorAll('.led-chip:not(.dragging):not(.led-slot)')];
   let closest = null;
   let closestOffset = Number.POSITIVE_INFINITY;
   for (const chip of chips) {
@@ -1350,10 +1385,21 @@ function buildLedChip(button) {
   chip.addEventListener('dragstart', (e) => {
     orderDragging = true;
     chip.classList.add('dragging');
+    // Dashed ghost pinned at the origin for the whole drag, so the starting
+    // position stays visible while the chip is moved around.
+    const slot = document.createElement('div');
+    slot.className = 'led-chip led-slot';
+    slot.textContent = chip.textContent;
+    chip.after(slot);
+    board.dragSlot = slot;
     if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
   });
   chip.addEventListener('dragend', () => {
     chip.classList.remove('dragging');
+    if (board.dragSlot) {
+      board.dragSlot.remove();
+      board.dragSlot = null;
+    }
     orderDragging = false;
     commitRgbOrder();
   });
@@ -1401,7 +1447,7 @@ function buildBoardLeds() {
     + 'banner (0-15) - not the visible LED count. Parallel-wired LEDs share one '
     + 'pixel, so button = 1 lights both. The three are sent together.');
 
-  const order = boardCard(grid, 'Button LED order', 'rgbmap');
+  const order = boardCard(grid, "Button LED order (drag'n'drop)", 'rgbmap');
   order.classList.add('board-wide');
 
   const list = document.createElement('div');
@@ -1715,7 +1761,6 @@ function buildApplyCommands(cfg) {
 
   cmds.push(`hyst ${cfg.hyst}`);
   cmds.push(`avg ${cfg.avg}`);
-  cmds.push(`latency ${cfg.latency}`);
   cmds.push(`debounce ${cfg.debounceOn} ${cfg.debounceOff}`);
 
   const filter = decodeFilter(cfg.filter);
@@ -1814,7 +1859,6 @@ function buildParamsView(cfg) {
   const rows = [
     ['Release margin (hyst)', `${cfg.hyst}%`],
     ['Averaging', cfg.avg > 1 ? `${cfg.avg} frames` : 'off'],
-    ['Latency', `${cfg.latency} frames`],
     ['Debounce', `on ${cfg.debounceOn}, off ${cfg.debounceOff}`],
     ['Filter (ffi/sfi/esi)', `${filter.ffi} / ${filter.sfi} / ${filter.esi}`],
     ['Gain (cdc/cdt)', `${cfg.gainCdc} / ${cfg.gainCdt}`],
@@ -2365,6 +2409,9 @@ function clearLog() {
   recording.samples = [];
   recording.startedAt = performance.now();
   recording.startIso = new Date().toISOString();
+  // The sample clock restarts at 0, so the disk pointer (a sample.t) must too,
+  // otherwise the fresh samples would look "already written" and be skipped.
+  autoSave.lastSampleT = -1;
   updateRecordStatus();
   notify('Session log cleared');
 }
@@ -2387,11 +2434,31 @@ function downloadFile(content, type, filename) {
   URL.revokeObjectURL(url);
 }
 
+// Session-CSV row formats, shared by the manual export and the auto-save so both
+// paths always agree on the header, the sample row, and the action-journal line.
+function sessionCsvHeader() {
+  return ['t_ms', ...zones, ...zones.map((zone) => `${zone}_on`)].join(',');
+}
+
+function sessionCsvRow(s) {
+  return [s.t, ...s.deltas, ...s.active].join(',');
+}
+
+function sessionActionLine(a, t) {
+  return `# ${t},${a.kind},"${a.text.replace(/"/g, '""')}"`;
+}
+
 function exportSessionCsv() {
   if (!recording.samples.length) { notify('Nothing recorded yet', 'warn'); return; }
-  const header = ['t_ms', ...zones, ...zones.map((zone) => `${zone}_on`)];
-  const lines = [header.join(',')];
-  for (const s of recording.samples) lines.push([s.t, ...s.deltas, ...s.active].join(','));
+  const lines = [sessionCsvHeader()];
+  for (const s of recording.samples) lines.push(sessionCsvRow(s));
+  // Trailing action journal (commented lines, same clock as t_ms). A negative
+  // t_ms means the action happened before the first recorded sample.
+  lines.push('', '# actions: t_ms,kind,text');
+  for (const a of actionLog) {
+    const t = Math.round(a.t - recording.startedAt);
+    lines.push(sessionActionLine(a, t));
+  }
   downloadFile(lines.join('\n'), 'text/csv', logFileName('session', 'csv'));
 }
 
@@ -2403,6 +2470,14 @@ function exportSessionJson() {
     durationMs: last ? last.t : 0,
     zones: [...zones],
     samples: recording.samples,
+    // Monitor-side actions on the same clock as samples.t; negative t = the
+    // action happened before the first recorded sample.
+    actions: actionLog.map((a) => ({
+      t: Math.round(a.t - recording.startedAt),
+      at: a.at,
+      kind: a.kind,
+      text: a.text,
+    })),
   };
   downloadFile(JSON.stringify(payload), 'application/json', logFileName('session', 'json'));
 }
@@ -2440,6 +2515,241 @@ els.logRecord.addEventListener('click', clearLog);
 els.logSessionCsv.addEventListener('click', exportSessionCsv);
 els.logSessionJson.addEventListener('click', exportSessionJson);
 els.trigClear.addEventListener('click', clearLastTriggers);
+
+// --- Auto-save session logs to disk ----------------------------------------
+
+// Mirrors the exported session CSV, but written continuously to a folder the
+// user picks once (File System Access API). The directory handle is remembered
+// in IndexedDB, so on a later visit the same folder is used with no re-pick,
+// provided the browser still grants read/write permission.
+const AUTOSAVE_DB = 'monitor-logs';
+const AUTOSAVE_STORE = 'handles';
+const AUTOSAVE_KEY = 'root';
+const AUTOSAVE_FLUSH_MS = 60000;   // append new data at most once a minute
+
+// status: 'unsupported' | 'off' | 'reauth' | 'active'.
+//   off      - no folder chosen
+//   reauth   - a folder is remembered but permission is 'prompt' (needs a click)
+//   active   - saving; a file is created lazily on the first sample
+const autoSave = {
+  supported: typeof window !== 'undefined'
+    && typeof window.showDirectoryPicker === 'function'
+    && 'indexedDB' in window,
+  handle: null,
+  status: 'off',
+  timer: null,
+  fileName: '',        // frozen at the first flush that carries a sample
+  year: '',
+  month: '',
+  headerWritten: false,
+  lastSampleT: -1,          // sample.t of the last sample written to disk
+  lastActionT: -Infinity,   // performance.now of the last action written
+  writing: false,           // guard: never overlap two async writes
+  warned: false,            // notify a write failure only once
+};
+
+// A page-session write is never blocked on connection: samples accumulate in
+// `recording` regardless of the visible tab, so the timer alone drives writes.
+
+function idbOpen() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(AUTOSAVE_DB, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore(AUTOSAVE_STORE);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbGetHandle() {
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const req = db.transaction(AUTOSAVE_STORE, 'readonly')
+      .objectStore(AUTOSAVE_STORE).get(AUTOSAVE_KEY);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbSetHandle(handle) {
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(AUTOSAVE_STORE, 'readwrite');
+    tx.objectStore(AUTOSAVE_STORE).put(handle, AUTOSAVE_KEY);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function idbDeleteHandle() {
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(AUTOSAVE_STORE, 'readwrite');
+    tx.objectStore(AUTOSAVE_STORE).delete(AUTOSAVE_KEY);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+// Freeze the file name and its year/month folder on the first sample of this
+// page session, so the whole session lands in one dated file.
+function initAutoSaveFile() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  autoSave.year = String(d.getFullYear());
+  autoSave.month = p(d.getMonth() + 1);
+  autoSave.fileName = `maipico-session-${autoSave.year}-${autoSave.month}-`
+    + `${p(d.getDate())}-${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}.csv`;
+}
+
+async function autoSaveFileHandle() {
+  const yearDir = await autoSave.handle.getDirectoryHandle(autoSave.year, { create: true });
+  const monthDir = await yearDir.getDirectoryHandle(autoSave.month, { create: true });
+  return monthDir.getFileHandle(autoSave.fileName, { create: true });
+}
+
+function autoSaveStatusText() {
+  if (autoSave.status === 'unsupported') {
+    return 'Not supported: this needs Chrome or Edge.';
+  }
+  if (autoSave.status === 'off') {
+    return 'Off. Choose a folder to save every session to disk automatically.';
+  }
+  if (autoSave.status === 'reauth') {
+    return 'Paused: the browser needs permission again. Click Choose folder to allow it.';
+  }
+  return autoSave.fileName
+    ? `Active: saving to ${autoSave.year}/${autoSave.month}/${autoSave.fileName}`
+    : 'Active: a file is created on the next sample.';
+}
+
+function updateAutoSaveUi() {
+  els.autosaveStatus.textContent = autoSaveStatusText();
+  els.autosaveChoose.hidden = autoSave.status === 'unsupported';
+  els.autosaveDisable.hidden = autoSave.status === 'unsupported' || autoSave.status === 'off';
+}
+
+function setAutoSaveStatus(status) {
+  autoSave.status = status;
+  updateAutoSaveUi();
+}
+
+function startAutoSaveTimer() {
+  if (autoSave.timer) clearInterval(autoSave.timer);
+  autoSave.timer = setInterval(() => { flushAutoSave(); }, AUTOSAVE_FLUSH_MS);
+}
+
+// Turn saving on for this page session: a fresh dated file, pointers rewound so
+// the first flush captures everything recorded so far.
+function activateAutoSave() {
+  autoSave.fileName = '';
+  autoSave.year = '';
+  autoSave.month = '';
+  autoSave.headerWritten = false;
+  autoSave.lastSampleT = -1;
+  autoSave.lastActionT = -Infinity;
+  autoSave.warned = false;
+  setAutoSaveStatus('active');
+  startAutoSaveTimer();
+  flushAutoSave();
+}
+
+// Append whatever is new since the last flush: sample rows first, then the new
+// action-journal lines. The header is written only when the file is created.
+async function flushAutoSave() {
+  if (autoSave.status !== 'active' || !autoSave.handle || autoSave.writing) return;
+
+  const newSamples = recording.samples.filter((s) => s.t > autoSave.lastSampleT);
+  // The file is created on the first sample, never before: no empty files.
+  if (!autoSave.fileName && !newSamples.length) return;
+  const newActions = actionLog.filter((a) => a.t > autoSave.lastActionT);
+  if (autoSave.fileName && !newSamples.length && !newActions.length) return;
+
+  autoSave.writing = true;
+  const firstCreate = !autoSave.fileName;
+  try {
+    if (!autoSave.fileName) initAutoSaveFile();
+    const fileHandle = await autoSaveFileHandle();
+    const existing = await fileHandle.getFile();
+    const size = existing.size;
+
+    const lines = [];
+    if (!autoSave.headerWritten && size === 0) lines.push(sessionCsvHeader());
+    for (const s of newSamples) lines.push(sessionCsvRow(s));
+    for (const a of newActions) {
+      const t = Math.round(a.t - recording.startedAt);
+      lines.push(sessionActionLine(a, t));
+    }
+
+    if (lines.length) {
+      const writable = await fileHandle.createWritable({ keepExistingData: true });
+      await writable.seek(size);
+      await writable.write(`${lines.join('\n')}\n`);
+      await writable.close();
+    }
+
+    autoSave.headerWritten = true;
+    if (newSamples.length) autoSave.lastSampleT = newSamples[newSamples.length - 1].t;
+    if (newActions.length) autoSave.lastActionT = newActions[newActions.length - 1].t;
+    if (firstCreate) updateAutoSaveUi();
+  } catch {
+    // A failed write must never break the monitor; warn once, keep trying.
+    if (!autoSave.warned) {
+      autoSave.warned = true;
+      notify('Auto-save to disk failed', 'warn');
+    }
+  } finally {
+    autoSave.writing = false;
+  }
+}
+
+async function chooseAutoSaveFolder() {
+  els.autosaveChoose.disabled = true;
+  try {
+    // A remembered folder in the 'prompt' state only needs its permission back:
+    // the button click is the required user gesture, so re-picking is optional.
+    if (autoSave.handle && autoSave.status === 'reauth') {
+      const perm = await autoSave.handle.requestPermission({ mode: 'readwrite' });
+      if (perm === 'granted') { activateAutoSave(); return; }
+    }
+    const handle = await window.showDirectoryPicker({ id: 'maipico-logs', mode: 'readwrite' });
+    autoSave.handle = handle;
+    await idbSetHandle(handle);
+    activateAutoSave();
+  } catch (error) {
+    if (error && error.name === 'AbortError') return;   // user dismissed the picker
+    notify('Could not open the folder', 'warn');
+  } finally {
+    els.autosaveChoose.disabled = false;
+  }
+}
+
+async function disableAutoSave() {
+  if (autoSave.timer) { clearInterval(autoSave.timer); autoSave.timer = null; }
+  autoSave.handle = null;
+  autoSave.fileName = '';
+  setAutoSaveStatus('off');
+  try { await idbDeleteHandle(); } catch { /* nothing stored to remove */ }
+}
+
+async function initAutoSave() {
+  if (!autoSave.supported) { setAutoSaveStatus('unsupported'); return; }
+  els.autosaveChoose.addEventListener('click', chooseAutoSaveFolder);
+  els.autosaveDisable.addEventListener('click', disableAutoSave);
+  // Best-effort final append when the page goes away (reload, close, navigate).
+  window.addEventListener('pagehide', () => { flushAutoSave(); });
+
+  try {
+    const handle = await idbGetHandle();
+    if (!handle) { setAutoSaveStatus('off'); return; }
+    autoSave.handle = handle;
+    const perm = await handle.queryPermission({ mode: 'readwrite' });
+    // 'granted' resumes silently; anything else waits for a click to re-grant.
+    if (perm === 'granted') activateAutoSave();
+    else setAutoSaveStatus('reauth');
+  } catch {
+    setAutoSaveStatus('off');
+  }
+}
 
 // --- Auto-calibration wizard -----------------------------------------------
 
@@ -2480,11 +2790,9 @@ const calib = {
   phase: 'idle',        // 'idle' | 'noise' | 'press' | 'results'
   noiseCeil: new Array(N_Z).fill(0),
   noiseP95: new Array(N_Z).fill(0),
-  noiseSamples: Array.from({ length: N_Z }, () => []),
   pressPeak: new Array(N_Z).fill(null),   // null = zone not measured
   threshold: new Array(N_Z).fill(0),
   status: new Array(N_Z).fill('kept'),    // 'ok' | 'risky' | 'kept'
-  noiseEndsAt: 0,
   pressOrder: [],       // mapped zone indices, in A1..E8 order
   pressState: new Array(N_Z).fill('pending'),  // 'pending'|'measured'|'skipped'
   pressChips: [],       // one selectable chip per mapped zone
@@ -2522,7 +2830,7 @@ const calib = {
     trialIdx: 0,
     pending: null,
   },
-  tuneSaved: null,      // { avg, debounceOn, debounceOff, latency } or null
+  tuneSaved: null,      // { avg, debounceOn, debounceOff } or null
   tuned: null,          // { avg, debounceOn, debounceOff, hyst } or null
 };
 
@@ -2592,9 +2900,7 @@ function calibPercentile(samples, p) {
 }
 
 // Show one wizard step, hide the rest, and light its marker in the step list.
-let calibVisibleStep = 1;
 function calibShowStep(step) {
-  calibVisibleStep = step;
   document.querySelectorAll('.calib-step').forEach((el) => {
     el.hidden = Number(el.dataset.step) !== step;
   });
@@ -2680,7 +2986,7 @@ function calibLogClear() {
 function calibLog(message) {
   const line = document.createElement('div');
   line.className = 'calib-log-line';
-  line.textContent = `[${new Date().toTimeString().slice(0, 8)}] ${message}`;
+  line.textContent = `[${clockStamp()}] ${message}`;
   cel.console.appendChild(line);
   while (cel.console.childElementCount > 200) cel.console.removeChild(cel.console.firstChild);
   cel.console.scrollTop = cel.console.scrollHeight;
@@ -2693,7 +2999,6 @@ function calibRestoreGlobals() {
   if (!s) return;
   send(`avg ${s.avg}`);
   send(`debounce ${s.debounceOn} ${s.debounceOff}`);
-  send(`latency ${s.latency}`);
   calib.tuneSaved = null;
 }
 
@@ -2704,7 +3009,6 @@ function calibReset() {
   calib.phase = 'idle';
   calib.noiseCeil.fill(0);
   calib.noiseP95.fill(0);
-  calib.noiseSamples.forEach((arr) => { arr.length = 0; });
   calib.pressPeak.fill(null);
   calib.quickfire.fill(null);
   calib.threshold.fill(0);
@@ -2789,7 +3093,6 @@ function calibStartNoise() {
       avg: config.avg,
       debounceOn: config.debounceOn,
       debounceOff: config.debounceOff,
-      latency: config.latency,
     };
   }
   cel.console.hidden = false;
@@ -2868,8 +3171,6 @@ function calibTuneAdvance() {
     calibLog(`edit param avg: ${calib.tuneSaved.avg} → 1`);
     send('debounce 1 3');
     calibLog(`edit param debounce_on: ${calib.tuneSaved.debounceOn} → 1`);
-    send('latency 0');
-    if (calib.tuneSaved.latency !== 0) calibLog(`edit param latency: ${calib.tuneSaved.latency} → 0`);
     t.cur = { avg: 1, debounceOn: 1 };
     calibTuneResetWindow();
     calibTuneEnter('native', CALIB_TUNE_NATIVE_MS);
@@ -4009,6 +4310,7 @@ let lastActive = null;
 // it: collection (trace buffers, log stats, calibration measurements) always
 // runs, but the DOM of a hidden tab is not worth updating 25 times a second.
 let activeSection = 'info';
+let autoSaveWasConnected = false;
 
 function render(data) {
   els.rate.textContent = data.rate;
@@ -4017,6 +4319,12 @@ function render(data) {
     : (data.error || 'disconnected');
   els.link.className = `badge ${data.connected ? 'badge-on' : 'badge-off'}`;
   els.disconnect.hidden = !data.connected;
+
+  // Board just went away (unplugged): flush the tail to disk before the samples
+  // stop arriving. The Disconnect button reloads the page instead, which fires
+  // pagehide - covered there.
+  if (autoSaveWasConnected && !data.connected) flushAutoSave();
+  autoSaveWasConnected = data.connected;
 
   // While disconnected, the board-driven tabs show the shared gate and their
   // nav entry is locked; Information stays open.
@@ -4152,11 +4460,12 @@ function render(data) {
   // Advance the auto-calibration wizard while a measurement phase is running.
   calibFrame(data);
 
-  // Wizard traces reuse the Live renderers, gated on the visible calibration
-  // step (buffers already accumulated above).
+  // Wizard traces reuse the Live renderers, gated on the calibration phase
+  // (buffers already accumulated above): the all-zones trace during the step-1
+  // noise/auto-tune measurement, the targeted-zone trace during the presses.
   if (activeSection === 'calibration') {
-    if (calibVisibleStep === 1) drawGlobalSpark(cel.traceAll);
-    else if (calibVisibleStep === 2) drawCalibPressTrace();
+    if (calib.phase === 'noise') drawGlobalSpark(cel.traceAll);
+    else if (calib.phase === 'press') drawCalibPressTrace();
   }
 
   // Live calibration observes real play whenever it is running.
@@ -4364,6 +4673,7 @@ function start() {
   calibInit();
   liveCalInit();
   initLiveThr();
+  initAutoSave();
   geometry = swapDE({ ...ZONES_GEOMETRY });
 
   buildDisc(els.liveDisc, livePads, (zone) => {

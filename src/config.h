@@ -21,7 +21,6 @@
 #define SENSE_HYST_MAX 90
 #define SENSE_AVG_MIN 1
 #define SENSE_AVG_MAX 16
-#define SENSE_LATENCY_MAX 9
 #define SENSE_DEBOUNCE_MAX 15
 #define SENSE_RATE_MIN 1
 #define SENSE_RATE_MAX 60000
@@ -44,7 +43,7 @@ typedef struct __attribute__((packed)) {
         uint8_t hysteresis;      // release margin, percent of threshold
         uint8_t filter;          // MPR121 FFI/SFI/ESI packed
         uint8_t avg;             // software moving-average window, 1..16
-        uint8_t latency;         // output delay, frames
+        uint8_t reserved_latency; // was output delay (removed); kept for layout, forced 0
         uint8_t debounce_on;     // samples above threshold before ON
         uint8_t debounce_off;    // samples below release before OFF
         uint8_t baseline_mode;   // 0 = MPR121 hardware, 1 = software drift

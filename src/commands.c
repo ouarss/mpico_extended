@@ -55,8 +55,8 @@ static void disp_sense()
     print_threshold_zone("C", 16, 2);
     print_threshold_zone("D", 18, 8);
     print_threshold_zone("E", 26, 8);
-    printf("  Hysteresis: %u%%   Avg: %u   Latency: %u\n",
-           mai_cfg->sense.hysteresis, mai_cfg->sense.avg, mai_cfg->sense.latency);
+    printf("  Hysteresis: %u%%   Avg: %u\n",
+           mai_cfg->sense.hysteresis, mai_cfg->sense.avg);
     printf("  Debounce (on, off): %u, %u\n",
            mai_cfg->sense.debounce_on, mai_cfg->sense.debounce_off);
     printf("  Baseline: %s (rate %u)\n",
@@ -104,7 +104,7 @@ static void feed_publish_config()
                       i ? ",%u" : "%u", mai_cfg->alt.rgb_button[i]);
     }
     snprintf(line + n, sizeof(line) - n,
-           "],\"hyst\":%u,\"filter\":%u,\"avg\":%u,\"latency\":%u,"
+           "],\"hyst\":%u,\"filter\":%u,\"avg\":%u,"
            "\"baselineMode\":%u,\"rate\":%u,\"gainCdc\":%u,\"gainCdt\":%u,"
            "\"debounceOn\":%u,\"debounceOff\":%u,"
            "\"level\":%u,\"rgbButton\":%u,\"rgbCab\":%u,\"rgbBanner\":%u,"
@@ -112,7 +112,7 @@ static void feed_publish_config()
            "\"tweakMain\":%u,\"tweakAux\":%u,"
            "\"saved\":%s}\n",
            mai_cfg->sense.hysteresis, mai_cfg->sense.filter, mai_cfg->sense.avg,
-           mai_cfg->sense.latency, mai_cfg->sense.baseline_mode,
+           mai_cfg->sense.baseline_mode,
            mai_cfg->sense.baseline_rate, mai_cfg->sense.gain_cdc,
            mai_cfg->sense.gain_cdt, mai_cfg->sense.debounce_on,
            mai_cfg->sense.debounce_off,
@@ -427,23 +427,6 @@ static void handle_hyst(int argc, char *argv[])
         return;
     }
     mai_cfg->sense.hysteresis = v;
-    sense_changed();
-}
-
-static void handle_latency(int argc, char *argv[])
-{
-    const char *usage = "Usage: latency <0..9>\n"
-                        "  Output delay in frames.\n";
-    if (argc != 1) {
-        printf(usage);
-        return;
-    }
-    int v = cli_extract_non_neg_int(argv[0], 0);
-    if ((v < 0) || (v > SENSE_LATENCY_MAX)) {
-        printf(usage);
-        return;
-    }
-    mai_cfg->sense.latency = v;
     sense_changed();
 }
 
@@ -995,7 +978,6 @@ void commands_init()
     cli_register("thr", handle_thr, "Set absolute touch threshold per zone.");
     cli_register("hyst", handle_hyst, "Set release hysteresis (%).");
     cli_register("avg", handle_avg, "Set moving-average window.");
-    cli_register("latency", handle_latency, "Set output latency (frames).");
     cli_register("debounce", handle_debounce, "Set debounce samples (on/off).");
     cli_register("baseline", handle_baseline, "Set baseline mode (hw/soft).");
     cli_register("rebase", handle_rebase, "Re-seed the idle baseline.");
