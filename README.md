@@ -1,18 +1,28 @@
 # mpico_extended
 
-An alternative firmware for **full-size** maimai-style controllers, with a web
-monitor to calibrate and debug a panel from the browser instead of from a blind
-serial console.
-
-> **Built on [mai_pico](https://github.com/whowechina/mai_pico) by whowechina.**
-> The original firmware, the board design and the electronics are their work,
-> and this repository would not exist without it. Please go star the original
-> project.
+> [!IMPORTANT]
+> ## Built on [mai_pico](https://github.com/whowechina/mai_pico) by whowechina
+>
+> The original firmware, the board design and the electronics are **their
+> work**. This repository would not exist without it, and everything good here
+> starts from what they built.
+>
+> ### ⭐ [Go star the original project](https://github.com/whowechina/mai_pico)
 >
 > This is **not** official, **not** a fork and **not** affiliated: it is a
 > modified version, published under GPL-3.0 as the original licence requires.
 > Base: [`e21fa23`](https://github.com/whowechina/mai_pico/commit/e21fa23) of
 > `firmware/`, 27 August 2025.
+
+An alternative firmware for **full-size** maimai-style controllers, with a web
+monitor to calibrate and debug a panel from the browser instead of from a blind
+serial console.
+
+### → [Open the monitor](https://ouarss.github.io/mpico_extended/)
+
+Chrome or Edge, nothing to install. Without a board connected it still opens,
+so you can read the documentation and see what the tool does before flashing
+anything.
 
 > [!NOTE]
 > **Personal note, so you know what you are getting.** This project has been
@@ -87,9 +97,14 @@ board runs.
 | **Profiles** | Named snapshots of the whole setup, exportable and importable. |
 | **Console** | Raw CLI access for everything else. |
 
+It runs at **[ouarss.github.io/mpico_extended](https://ouarss.github.io/mpico_extended/)**,
+or straight from `monitor/index.html` in a local checkout. Both work the same;
+the online one also gets the log auto-save, which a `file://` page cannot use.
+
 It is original work, not derived from the upstream code, and talks to the board
-over **WebSerial** (so: Chrome or Edge, over HTTPS or from a local file).
-Nothing is uploaded anywhere. No account, no server, no telemetry.
+over **WebSerial** (so: Chrome or Edge). Nothing is uploaded anywhere. No
+account, no server, no telemetry: the page is served as static files and talks
+only to your serial port.
 
 Its **Information tab is the real documentation**: eleven articles covering the
 hardware, how detection works, fighting false triggers, both calibration modes,
@@ -185,8 +200,10 @@ The result is `mpico_extended.uf2` at the repository root.
 
 Hold **BOOTSEL** while plugging the USB cable, then drop the `.uf2` on the
 `RPI-RP2` drive that appears. Coming from another firmware? Run `factory` once
-in the CLI, then the auto-calibration wizard: thresholds are specific to your
-panel.
+in the CLI, then open the
+[monitor](https://ouarss.github.io/mpico_extended/) and run the
+auto-calibration wizard: thresholds are specific to your panel and do not carry
+over from someone else's.
 
 Prebuilt binaries are attached to the
 [releases](https://github.com/ouarss/mpico_extended/releases).
