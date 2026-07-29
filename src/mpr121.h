@@ -1,6 +1,9 @@
 /*
  * MPR121 Captive Touch Sensor
  * WHowe <github.com/whowechina>
+ *
+ * Modified 2025-2026 for mpico_extended: API for the filtered/baseline reads
+ * and the front-end tuning; the unused hardware-decision calls were dropped.
  * 
  */
 

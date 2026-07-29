@@ -1,6 +1,9 @@
 /*
  * RGB LED (WS2812) Strip control
  * WHowe <github.com/whowechina>
+ *
+ * Modified 2025-2026 for mpico_extended: the button-to-LED chain order is
+ * remappable, so a cabinet can be wired in any order.
  * 
  */
 

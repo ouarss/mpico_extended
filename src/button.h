@@ -1,6 +1,8 @@
 /*
  * Mai Controller Buttons
  * WHowe <github.com/whowechina>
+ *
+ * Modified 2025-2026 for mpico_extended: dropped an unused flash include.
  */
 
 #ifndef BUTTONS_H

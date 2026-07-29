@@ -1,4 +1,4 @@
-// UI logic for the Mai Pico monitor. Constants N_ZONES / N_ELECTRODES come from
+// UI logic for the MPico Extended monitor. Constants N_ZONES / N_ELECTRODES come from
 // transport.js (same script scope); short aliases keep the loops readable.
 const N_Z = N_ZONES;         // 34 zones
 const N_E = N_ELECTRODES;    // 36 electrodes
@@ -19,10 +19,31 @@ function storageSet(key, value) {
   try { localStorage.setItem(key, value); return true; } catch { return false; }
 }
 
+// One-shot migration of the storage keys renamed along with the project
+// (maipico-* -> mpico-*), so saved profiles and preferences survive the rename.
+// Runs before any key is read; old entries are dropped, so later loads are free.
+function migrateStorageKeys() {
+  const renamed = [
+    ['maipico-sidebar-collapsed', 'mpico-sidebar-collapsed'],
+    ['maipico-profiles', 'mpico-profiles'],
+    ['maipico-calib-sound', 'mpico-calib-sound'],
+  ];
+  for (const [oldKey, newKey] of renamed) {
+    const value = storageGet(oldKey);
+    if (value === null || storageGet(newKey) !== null) continue;
+    if (storageSet(newKey, value)) {
+      // A failing removeItem only leaves a stale duplicate behind: the copy is
+      // already safe, and storage being blocked is handled by the guards above.
+      try { localStorage.removeItem(oldKey); } catch { /* storage unavailable */ }
+    }
+  }
+}
+migrateStorageKeys();
+
 // Restore the sidebar collapsed state before first paint, so a collapsed rail
 // does not flash to full width on load. This script runs at end of body, so the
 // class lands before the browser paints.
-const SIDEBAR_COLLAPSED_KEY = 'maipico-sidebar-collapsed';
+const SIDEBAR_COLLAPSED_KEY = 'mpico-sidebar-collapsed';
 if (storageGet(SIDEBAR_COLLAPSED_KEY) === '1') {
   document.body.classList.add('sidebar-collapsed');
 }
@@ -36,7 +57,7 @@ let barScale = BAR_FLOOR;
 const SPARK_LEN = 240;       // trace ring-buffer length, ~10 s at 25 Hz
 
 // CLI prompt for the console colouring.
-const PROMPT_RE = /^(mai_pico>\s?)(.*)$/;
+const PROMPT_RE = /^(mpico>\s?)(.*)$/;
 
 // Zone geometry, assigned from the global in zones-geometry.js at start().
 let geometry = {};
@@ -1577,7 +1598,7 @@ function refreshBoard(cfg) {
 // { name, savedAt (ISO), config } - config being a deep copy of the last C
 // line the firmware published. Everything here is browser-side; nothing is
 // written to flash until the user applies a profile and then saves.
-const PROFILE_STORE_KEY = 'maipico-profiles';
+const PROFILE_STORE_KEY = 'mpico-profiles';
 
 // ~90 commands per apply. A short gap between them keeps the serial port from
 // being flooded while still finishing in under two seconds.
@@ -1676,7 +1697,7 @@ function exportProfile(profile) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `maipico-${safeFileName(profile.name)}.json`;
+  link.download = `mpico-${safeFileName(profile.name)}.json`;
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -1702,7 +1723,7 @@ function importProfileFile(file) {
       return;
     }
     if (!isProfile(parsed)) {
-      notify('That file is not a Mai Pico profile', 'warn');
+      notify('That file is not an MPico Extended profile', 'warn');
       return;
     }
     const list = loadProfiles();
@@ -2455,7 +2476,7 @@ function clearLog() {
 // A timestamped, filename-safe name for an exported file.
 function logFileName(kind, ext) {
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-  return `maipico-${kind}-${stamp}.${ext}`;
+  return `mpico-${kind}-${stamp}.${ext}`;
 }
 
 function downloadFile(content, type, filename) {
@@ -2635,7 +2656,7 @@ function initAutoSaveFile() {
   const p = (n) => String(n).padStart(2, '0');
   autoSave.year = String(d.getFullYear());
   autoSave.month = p(d.getMonth() + 1);
-  autoSave.fileName = `maipico-session-${autoSave.year}-${autoSave.month}-`
+  autoSave.fileName = `mpico-session-${autoSave.year}-${autoSave.month}-`
     + `${p(d.getDate())}-${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}.csv`;
 }
 
@@ -2749,7 +2770,7 @@ async function chooseAutoSaveFolder() {
       const perm = await autoSave.handle.requestPermission({ mode: 'readwrite' });
       if (perm === 'granted') { activateAutoSave(); return; }
     }
-    const handle = await window.showDirectoryPicker({ id: 'maipico-logs', mode: 'readwrite' });
+    const handle = await window.showDirectoryPicker({ id: 'mpico-logs', mode: 'readwrite' });
     autoSave.handle = handle;
     await idbSetHandle(handle);
     activateAutoSave();
@@ -2962,7 +2983,7 @@ function calibShowStep(step) {
 // Beeps (Web Audio) and spoken zone names, both optional. The AudioContext is
 // created lazily on the first user gesture (the Start button, the toggle) so an
 // autoplay policy never silently blocks it.
-const CALIB_SOUND_KEY = 'maipico-calib-sound';
+const CALIB_SOUND_KEY = 'mpico-calib-sound';
 let calibSoundOn = storageGet(CALIB_SOUND_KEY) !== '0';   // default on
 let calibAudioCtx = null;
 

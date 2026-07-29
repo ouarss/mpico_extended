@@ -23,6 +23,14 @@
  *
  */
 
+/*
+ * Modified 2025-2026 for mpico_extended: bounds checks on host-requested string
+ * descriptor indices, and product/interface names carrying this firmware's own
+ * identity. The USB vendor and product ids are deliberately unchanged, since
+ * the game and the existing tools identify the board by them. The MIT licence
+ * above still covers this file.
+ */
+
 #include "usb_descriptors.h"
 #include "pico/unique_id.h"
 #include "tusb.h"
@@ -163,14 +171,14 @@ static char joy_name_string[128] = "I/O CONTROL BD;15257;01;90;1831;6679A;00;GOU
 static const char *string_desc_arr[] = {
     (const char[]){0x09, 0x04},  // 0: is supported language is English (0x0409)
     "SEGA", // 1: Manufacturer
-    "Mai Pico", // 2: Product
+    "MPico Extended", // 2: Product
     serial_number_str, // 3: Serials, use chip ID
     joy_name_string,
-    "Mai Pico NKRO",
-    "Mai Pico Command Line Port",
-    "Mai Pico Touch Port",
-    "Mai Pico LED Port",
-    "Mai Pico AIME Port",
+    "MPico Extended NKRO",
+    "MPico Extended Command Line Port",
+    "MPico Extended Touch Port",
+    "MPico Extended LED Port",
+    "MPico Extended AIME Port",
 };
 
 // Invoked when received GET STRING DESCRIPTOR request
@@ -217,5 +225,5 @@ uint16_t const* tud_descriptor_string_cb(uint8_t index, uint16_t langid)
 
 void usb_descriptors_disable_io4()
 {
-    strcpy(joy_name_string, "Mai Pico Joystick");
+    strcpy(joy_name_string, "MPico Extended Joystick");
 }

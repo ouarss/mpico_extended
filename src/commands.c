@@ -1,3 +1,13 @@
+/*
+ * Controller Command Line Commands
+ * WHowe <github.com/whowechina>
+ *
+ * Modified 2025-2026 for mpico_extended: commands for the software touch
+ * decision (thr, hyst, avg, debounce, gain, filter, baseline, rebase, preset),
+ * a richer 'raw' output, and the machine 'feed' stream (F frames + C config as
+ * JSON) that drives the web monitor.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

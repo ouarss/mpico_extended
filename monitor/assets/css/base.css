@@ -75,6 +75,17 @@ body {
 .sidebar-status .stat b { color: var(--text); }
 .sidebar-note { color: var(--muted); font-size: 11px; line-height: 1.4; margin: 2px 0; }
 .sidebar-note code { color: var(--text); }
+
+/* Attribution, kept in sight from every tab rather than buried in a page. */
+.sidebar-credit {
+  margin-top: auto;
+  padding-top: 14px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.sidebar-credit a { color: var(--muted); text-decoration: underline; }
+.sidebar-credit a:hover { color: var(--text); }
 .wide { width: 100%; text-align: center; }
 
 /* --- Sections ----------------------------------------------------------- */
@@ -465,6 +476,17 @@ button:hover { border-color: var(--accent); }
 .dl-btn:hover { background: rgba(61, 220, 132, .22); }
 .dl-btn svg { width: 15px; height: 15px; flex: none; }
 
+/* Sits next to .dl-btn: the GPL requires the source to be offered from the same
+   place as the binary, so this link travels with the download button. */
+.src-link {
+  margin-left: 10px;
+  color: var(--muted);
+  font-size: .88em;
+  text-decoration: underline;
+  vertical-align: middle;
+}
+.src-link:hover { color: var(--text); }
+
 /* Always-at-hand save, visible from every tab: an amber chip in the sidebar
    with a breathing dot. Quietly present, never blocking. */
 .sidebar-save {
@@ -654,6 +676,21 @@ button:hover { border-color: var(--accent); }
   line-height: 1.6;
 }
 .info-warn strong { color: #ff58e1; }
+
+/* Attribution block: quieter than a warning, but deliberately not hidden away. */
+.info-credit {
+  max-width: 100ch;
+  margin: 26px 0 0;
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, .03);
+  border-left: 3px solid var(--line);
+  border-radius: 0 8px 8px 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+.info-credit p { margin: 0 0 8px; }
+.info-credit p:last-child { margin-bottom: 0; }
+.info-credit a { color: var(--accent); text-decoration: underline; }
 
 .info-content ol,
 .info-content ul {

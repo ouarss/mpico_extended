@@ -23,6 +23,12 @@
  *
  */
 
+/*
+ * Modified 2025-2026 for mpico_extended: larger CDC TX FIFO, so a full monitor
+ * frame fits without blocking flushes in the 1 kHz main loop. The MIT licence
+ * above still covers this file.
+ */
+
 #ifndef _TUSB_CONFIG_H_
 #define _TUSB_CONFIG_H_
 

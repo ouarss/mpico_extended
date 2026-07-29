@@ -1,6 +1,10 @@
 /*
  * Controller Config
  * WHowe <github.com/whowechina>
+ *
+ * Modified 2025-2026 for mpico_extended: the sense block carries the software
+ * touch decision settings (per-zone absolute thresholds, hysteresis, averaging,
+ * debounce, MPR121 gain and filter, baseline mode).
  */
 
 #ifndef CONFIG_H

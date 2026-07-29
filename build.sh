@@ -1,52 +1,57 @@
 #!/usr/bin/env bash
 #
-# Mai Pico - compilation du firmware (.uf2)
+# mpico_extended - firmware build (.uf2)
 #
-# Usage :
-#   ./build.sh          # compilation (incrémentale)
-#   ./build.sh clean    # supprime build/ puis recompile à neuf
+# Usage:
+#   ./build.sh          # incremental build
+#   ./build.sh clean    # wipe build/ then rebuild from scratch
 #
-# À LANCER DANS UN SHELL UNIX (WSL ou MSYS2/Git Bash) : le CMake du projet
-# appelle les commandes Unix `cp` et `touch`, indisponibles en cmd/PowerShell pur.
+# RUN THIS FROM A UNIX SHELL (WSL or MSYS2/Git Bash): the project CMake calls
+# the Unix commands `cp` and `touch`, which plain cmd/PowerShell do not provide.
 #
-# Prérequis (voir CLAUDE.md) :
-#   - Pico SDK            : variable PICO_SDK_PATH (ou PICO_SDK_FETCH_FROM_GIT=ON)
-#   - Toolchain           : arm-none-eabi-gcc, cmake, make ou ninja
-#   - Sous-module aic_pico: firmware/modules/aic_pico/ peuplé
+# Requirements (see README.md):
+#   - Pico SDK        : PICO_SDK_PATH variable (or PICO_SDK_FETCH_FROM_GIT=ON)
+#   - Toolchain       : arm-none-eabi-gcc, cmake, make or ninja
+#   - aic_pico module : modules/aic_pico/ populated (see AIC_PICO_REV below)
 #
 set -euo pipefail
 
-# Se placer dans le dossier du script (firmware/), quel que soit l'appelant
+# Revision of aic_pico this firmware is built against. Pinned so that a fresh
+# clone reproduces the same binary; bump it deliberately, never by accident.
+AIC_PICO_REV="5a0dbc9d132218c67f2a3b500e4251c96fcaf2df"
+
+# Move to the script directory, whatever the caller's cwd is
 cd "$(dirname "$0")"
 FIRMWARE_DIR="$(pwd)"
 BUILD_DIR="$FIRMWARE_DIR/build"
 AIC_DIR="$FIRMWARE_DIR/modules/aic_pico"
 
-# --- Nettoyage optionnel ---
+# --- Optional clean ---
 if [ "${1:-}" = "clean" ]; then
-    echo ">> Nettoyage de $BUILD_DIR"
+    echo ">> Cleaning $BUILD_DIR"
     rm -rf "$BUILD_DIR"
 fi
 
-# --- Vérif du sous-module aic_pico ---
+# --- aic_pico module check ---
 if [ ! -f "$AIC_DIR/firmware/CMakeLists.txt" ]; then
-    echo "ERREUR : sous-module aic_pico absent ($AIC_DIR)."
-    echo "         Récupère-le avant de compiler, par exemple :"
-    echo "           git clone https://github.com/whowechina/aic_pico \"$AIC_DIR\""
+    echo "ERROR: aic_pico module missing ($AIC_DIR)."
+    echo "       Fetch it before building:"
+    echo "         git clone https://github.com/whowechina/aic_pico \"$AIC_DIR\""
+    echo "         git -C \"$AIC_DIR\" checkout $AIC_PICO_REV"
     exit 1
 fi
 
-# --- Vérif du Pico SDK ---
+# --- Pico SDK check ---
 if [ -z "${PICO_SDK_PATH:-}" ] && [ "${PICO_SDK_FETCH_FROM_GIT:-}" != "ON" ]; then
-    echo "ERREUR : PICO_SDK_PATH n'est pas défini."
-    echo "         Exporte le chemin du Pico SDK, par exemple :"
-    echo "           export PICO_SDK_PATH=\$HOME/pico/pico-sdk"
-    echo "         (ou : export PICO_SDK_FETCH_FROM_GIT=ON pour le télécharger automatiquement)"
+    echo "ERROR: PICO_SDK_PATH is not set."
+    echo "       Export the Pico SDK path, for example:"
+    echo "         export PICO_SDK_PATH=\$HOME/pico/pico-sdk"
+    echo "       (or: export PICO_SDK_FETCH_FROM_GIT=ON to download it automatically)"
     exit 1
 fi
 
-# --- Localiser les outils s'ils ne sont pas déjà dans le PATH ---
-# (utile quand les installs winget ne sont pas encore reflétés dans la session)
+# --- Locate the tools when they are not already in PATH ---
+# (useful when winget installs are not yet reflected in the current session)
 
 if ! command -v cmake >/dev/null 2>&1 && [ -x "/c/Program Files/CMake/bin/cmake.exe" ]; then
     PATH="/c/Program Files/CMake/bin:$PATH"
@@ -72,8 +77,8 @@ if ! command -v arm-none-eabi-gcc >/dev/null 2>&1 && [ -z "${PICO_TOOLCHAIN_PATH
     done
 fi
 
-# Compilateur HÔTE (MinGW-w64 / WinLibs) pour bâtir pioasm et picotool.
-# La toolchain ARM ne cible que le RP2040 ; ces outils tournent sur le PC.
+# HOST compiler (MinGW-w64 / WinLibs) to build pioasm and picotool.
+# The ARM toolchain only targets the RP2040; these tools run on the PC.
 if ! command -v gcc >/dev/null 2>&1; then
     for d in "$HOME"/AppData/Local/Microsoft/WinGet/Packages/BrechtSanders.WinLibs.*/mingw64/bin \
              "$HOME"/AppData/Local/Microsoft/WinGet/Packages/BrechtSanders.WinLibs.*/mingw32/bin; do
@@ -84,42 +89,42 @@ if ! command -v gcc >/dev/null 2>&1; then
     done
 fi
 
-# --- Vérif des outils ---
+# --- Tool checks ---
 if ! command -v cmake >/dev/null 2>&1; then
-    echo "ERREUR : cmake introuvable."
-    echo "         Installe-le : winget install --id Kitware.CMake -e"
+    echo "ERROR: cmake not found."
+    echo "       Install it: winget install --id Kitware.CMake -e"
     exit 1
 fi
 if ! command -v arm-none-eabi-gcc >/dev/null 2>&1 && [ -z "${PICO_TOOLCHAIN_PATH:-}" ]; then
-    echo "ERREUR : toolchain ARM introuvable (arm-none-eabi-gcc)."
-    echo "         Installe-la : winget install --id Arm.ArmGnuToolchain -e"
+    echo "ERROR: ARM toolchain not found (arm-none-eabi-gcc)."
+    echo "       Install it: winget install --id Arm.ArmGnuToolchain -e"
     exit 1
 fi
 if ! command -v gcc >/dev/null 2>&1 && ! command -v cl >/dev/null 2>&1 \
    && ! command -v clang >/dev/null 2>&1; then
-    echo "ERREUR : aucun compilateur HÔTE (gcc/cl/clang) pour bâtir pioasm/picotool."
-    echo "         Installe MinGW-w64 : winget install --id BrechtSanders.WinLibs.POSIX.UCRT -e"
+    echo "ERROR: no HOST compiler (gcc/cl/clang) to build pioasm/picotool."
+    echo "       Install MinGW-w64: winget install --id BrechtSanders.WinLibs.POSIX.UCRT -e"
     exit 1
 fi
 
-# --- Choix du générateur (Ninja si dispo, sinon Make) ---
+# --- Generator choice (Ninja when available, Make otherwise) ---
 if command -v ninja >/dev/null 2>&1; then
     GENERATOR="Ninja"
 else
     GENERATOR="Unix Makefiles"
 fi
 
-echo ">> Pico SDK   : ${PICO_SDK_PATH:-<téléchargement git>}"
-echo ">> Générateur : $GENERATOR"
+echo ">> Pico SDK : ${PICO_SDK_PATH:-<git download>}"
+echo ">> Generator: $GENERATOR"
 
-# --- Configuration CMake (uniquement si pas déjà configuré) ---
+# --- CMake configuration (only when not configured yet) ---
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 if [ ! -f CMakeCache.txt ]; then
     cmake -G "$GENERATOR" ..
 fi
 
-# --- Localiser Python (packaging UF2 de secours, voir plus bas) ---
+# --- Locate Python (fallback UF2 packaging, see below) ---
 PYTHON=""
 for cand in python python3 py; do
     if command -v "$cand" >/dev/null 2>&1; then
@@ -128,13 +133,13 @@ for cand in python python3 py; do
     fi
 done
 
-# --- Compilation ---
-# Le picotool fourni (v2.2.0) segfault a l'etape 'uf2 convert' sur cette machine.
-# objcopy a deja produit un .bin correct juste avant cet appel : on ne laisse donc
-# PAS l'echec de cette unique etape faire capoter tout le build, et on packagera le
-# .uf2 nous-memes avec tools/bin2uf2.py (autonome, sans dependance).
-BIN="$BUILD_DIR/src/mai_pico.bin"
-UF2="$BUILD_DIR/src/mai_pico.uf2"
+# --- Build ---
+# The bundled picotool (v2.2.0) segfaults at the 'uf2 convert' step on this
+# machine. objcopy has already produced a correct .bin right before that call,
+# so we do NOT let this single failing step break the whole build, and we
+# package the .uf2 ourselves with tools/bin2uf2.py (standalone, no dependency).
+BIN="$BUILD_DIR/src/mpico_extended.bin"
+UF2="$BUILD_DIR/src/mpico_extended.uf2"
 STAMP="$BUILD_DIR/.build-stamp"
 
 touch "$STAMP"
@@ -143,33 +148,34 @@ cmake --build . --parallel
 BUILD_RC=$?
 set -e
 
-# Si le .bin a ete (re)genere par CE build, la compilation et le link ont reussi ;
-# seule l'etape picotool a pu echouer -> on prend le relais pour produire le .uf2.
+# If the .bin was (re)generated by THIS build, compiling and linking succeeded;
+# only the picotool step may have failed -> take over and produce the .uf2.
 if [ -f "$BIN" ] && [ "$BIN" -nt "$STAMP" ]; then
     if [ -z "$PYTHON" ]; then
-        echo "ERREUR : Python introuvable pour packager le .uf2 (tools/bin2uf2.py)." >&2
+        echo "ERROR: Python not found to package the .uf2 (tools/bin2uf2.py)." >&2
         rm -f "$STAMP"
         exit 1
     fi
     "$PYTHON" "$FIRMWARE_DIR/tools/bin2uf2.py" "$BIN" "$UF2" >/dev/null
-    cp "$UF2" "$FIRMWARE_DIR/mai_pico.uf2"
+    cp "$UF2" "$FIRMWARE_DIR/mpico_extended.uf2"
 elif [ "$BUILD_RC" -ne 0 ]; then
-    echo "ERREUR : la compilation a echoue (avant l'etape de packaging UF2)." >&2
+    echo "ERROR: the build failed (before the UF2 packaging step)." >&2
     rm -f "$STAMP"
     exit "$BUILD_RC"
 fi
 rm -f "$STAMP"
 
-# --- Résultat ---
+# --- Result ---
 if [ -f "$UF2" ]; then
     echo ""
-    echo ">> OK : firmware généré"
+    echo ">> OK: firmware built"
     echo "   $UF2"
-    echo "   $FIRMWARE_DIR/mai_pico.uf2   (copie automatique)"
+    echo "   $FIRMWARE_DIR/mpico_extended.uf2   (automatic copy)"
     echo ""
-    echo "Flash  : maintiens BOOTSEL en branchant l'USB, puis glisse le .uf2 sur le disque RPI-RP2."
-    echo "Note   : après flash sur un boîtier déjà configuré, lance 'factory' une fois dans la CLI."
+    echo "Flash   : hold BOOTSEL while plugging the USB cable, then drop the .uf2 on the RPI-RP2 drive."
+    echo "Note    : after flashing an already configured board, run 'factory' once in the CLI."
+    echo "Release : attach this .uf2 to a GitHub release so the monitor download link stays valid."
 else
-    echo "ERREUR : le .uf2 n'a pas été généré." >&2
+    echo "ERROR: the .uf2 was not generated." >&2
     exit 1
 fi

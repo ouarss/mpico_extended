@@ -29,5 +29,7 @@ function(make_firmware board board_def)
                        COMMAND cp ${board}.uf2 ${CMAKE_CURRENT_LIST_DIR}/..)
 endfunction()
 
-make_firmware(mai_pico BOARD_MAI_PICO)
+# Modified 2025-2026 for mpico_extended: target renamed (the BOARD_MAI_PICO
+# board definition itself is unchanged upstream code).
+make_firmware(mpico_extended BOARD_MAI_PICO)
 

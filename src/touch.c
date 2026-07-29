@@ -2,6 +2,10 @@
  * Mai Pico Touch Keys
  * WHowe <github.com/whowechina>
  *
+ * Modified 2025-2026 for mpico_extended: the touch decision was moved from the
+ * MPR121 hardware comparator into the firmware, which is what makes full-size
+ * playfields tunable. See the description below.
+ *
  * The touch decision is done in software from the MPR121 filtered readings:
  *   delta = baseline - filtered   (a touch lowers the filtered value)
  * A zone turns active when its delta crosses an absolute per-zone threshold,

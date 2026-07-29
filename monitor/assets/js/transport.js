@@ -1,5 +1,5 @@
 /*
- * WebSerial link to a Mai Pico board.
+ * WebSerial link to an MPico Extended board.
  *
  * The page talks to the board's "Command Line" CDC interface directly: nothing
  * else to run, but Chrome or Edge only, and the port must be picked once from
@@ -18,7 +18,7 @@ const N_ELECTRODES = 36;    // 3 x MPR121, 12 electrodes each
 // F <36 filtered> <36 delta> <16-hex zone bitmap>
 const F_TOKENS = 1 + 2 * N_ELECTRODES + 1;   // 74
 
-const CLI_PROMPT = 'mai_pico>';
+const CLI_PROMPT = 'mpico>';
 // Holds a full command reply comfortably; the page only redraws the console
 // when its content changes, so the cap is about memory, not speed.
 const CONSOLE_LINES = 200;
@@ -200,7 +200,7 @@ function webSerialTransport(state, onUpdate) {
       releaseOnUnload();
 
       state.connected = true;
-      state.source = 'Mai Pico (WebSerial)';
+      state.source = 'MPico Extended (WebSerial)';
       state.error = '';
       onUpdate();
 

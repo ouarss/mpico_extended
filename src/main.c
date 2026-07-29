@@ -1,6 +1,9 @@
 /*
  * Controller Main
  * WHowe <github.com/whowechina>
+ *
+ * Modified 2025-2026 for mpico_extended: CLI banner and prompt renamed, and the
+ * monitor feed is polled from the main loop.
  */
 
 #include <stdlib.h>
@@ -196,8 +199,9 @@ void init()
     aime_sub_mode(mai_cfg->aime.mode);
     aime_virtual_aic(mai_cfg->aime.virtual_aic);
 
-    cli_init("mai_pico>", "\n   << Mai Pico Controller >>\n"
-                            " https://github.com/whowechina\n\n");
+    cli_init("mpico>", "\n   << MPico Extended Controller >>\n"
+                         " Based on mai_pico by whowechina\n"
+                         " https://github.com/whowechina/mai_pico\n\n");
     commands_init();
 
     mai_runtime.key_stuck = button_is_stuck();

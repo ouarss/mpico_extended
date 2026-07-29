@@ -1,6 +1,10 @@
 /*
  * Mai Pico Touch Keys
  * WHowe <github.com/whowechina>
+ *
+ * Modified 2025-2026 for mpico_extended: API of the software touch decision
+ * (per-zone filtered/baseline/delta readings), replacing the MPR121 hardware
+ * decision. The dead raw sensor API was removed.
  */
 
 #ifndef TOUCH_H

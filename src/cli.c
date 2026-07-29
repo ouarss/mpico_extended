@@ -1,3 +1,11 @@
+/*
+ * Controller Command Line Interface
+ * WHowe <github.com/whowechina>
+ *
+ * Modified 2025-2026 for mpico_extended: an exact command match now wins over
+ * prefix ambiguity, and a blank line no longer reaches strtok as NULL.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

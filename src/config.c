@@ -1,6 +1,9 @@
 /*
  * Controller Config and Runtime Data
  * WHowe <github.com/whowechina>
+ *
+ * Modified 2025-2026 for mpico_extended: defaults and bounds for the software
+ * touch decision settings.
  * 
  * Config is a global data structure that stores all the configuration
  * Runtime is something to share between files.

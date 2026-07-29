@@ -1,27 +1,27 @@
 #!/usr/bin/env python3
 """
-bin2uf2 - Convertit un binaire brut RP2040 (.bin) en image UF2 flashable.
+bin2uf2 - Convert a raw RP2040 binary (.bin) into a flashable UF2 image.
 
-Remplacant autonome de `picotool uf2 convert` quand ce dernier plante dans
-l'environnement de build (segfault a la conversion ELF->UF2). Le .bin genere
-par objcopy est charge a l'adresse de base de la flash RP2040.
+Standalone replacement for `picotool uf2 convert` when that one crashes in the
+build environment (segfault during the ELF->UF2 conversion). The .bin produced
+by objcopy is loaded at the RP2040 flash base address.
 
-Usage :
-    python bin2uf2.py <entree.bin> <sortie.uf2> [adresse_base_hex]
+Usage:
+    python bin2uf2.py <input.bin> <output.uf2> [base_address_hex]
 
-Adresse de base par defaut : 0x10000000 (debut de la flash XIP RP2040).
+Default base address: 0x10000000 (start of the RP2040 XIP flash).
 """
 
 import sys
 import struct
 
-# Constantes du format UF2 (voir Microsoft/uf2 et pico-sdk boot/uf2.h)
+# UF2 format constants (see Microsoft/uf2 and pico-sdk boot/uf2.h)
 UF2_MAGIC_START0 = 0x0A324655
 UF2_MAGIC_START1 = 0x9E5D5157
 UF2_MAGIC_END = 0x0AB16F30
 UF2_FLAG_FAMILY_ID = 0x00002000
 RP2040_FAMILY_ID = 0xE48BFF56
-PAYLOAD_SIZE = 256  # octets utiles par bloc UF2
+PAYLOAD_SIZE = 256  # useful bytes per UF2 block
 
 
 def convert(bin_path: str, uf2_path: str, base_addr: int) -> int:
@@ -61,7 +61,7 @@ def main() -> int:
     base_addr = int(sys.argv[3], 16) if len(sys.argv) > 3 else 0x10000000
 
     blocks = convert(bin_path, uf2_path, base_addr)
-    print(f"OK : {uf2_path} ({blocks} blocs, base 0x{base_addr:08x})")
+    print(f"OK: {uf2_path} ({blocks} blocks, base 0x{base_addr:08x})")
     return 0
 
 

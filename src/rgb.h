@@ -1,6 +1,9 @@
 /*
  * RGB LED (WS2812) Strip control
  * WHowe <github.com/whowechina>
+ *
+ * Modified 2025-2026 for mpico_extended: accessors for the per-button LED chain
+ * position, so the button order can be remapped.
  */
 
 #ifndef RGB_H

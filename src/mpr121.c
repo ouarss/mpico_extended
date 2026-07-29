@@ -2,6 +2,10 @@
  * MPR121 Captive Touch Sensor
  * WHowe <github.com/whowechina>
  *
+ * Modified 2025-2026 for mpico_extended: filtered and baseline register reads
+ * feeding the software decision, tunable CDC/CDT gain and FFI/SFI/ESI filter,
+ * bounded I2C read timeout, and removal of the unused hardware-decision API.
+ *
  */
 
 #include <stdint.h>

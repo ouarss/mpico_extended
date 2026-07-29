@@ -1,6 +1,9 @@
 /*
  * Controller Flash Save and Load
  * WHowe <github.com/whowechina>
+ *
+ * Modified 2025-2026 for mpico_extended: save_pending() reports unsaved changes
+ * to the monitor; an orphan locker typedef was removed.
  */
 
 #ifndef SAVE_H

@@ -1,3 +1,11 @@
+/*
+ * Controller HID Reports
+ * WHowe <github.com/whowechina>
+ *
+ * Modified 2025-2026 for mpico_extended: length guards before casting a
+ * host-supplied report.
+ */
+
 #include <stdint.h>
 #include <stdbool.h>
 

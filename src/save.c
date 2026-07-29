@@ -1,6 +1,10 @@
 /*
  * Controller Config Save and Load
  * WHowe <github.com/whowechina>
+ *
+ * Modified 2025-2026 for mpico_extended: core1 is parked out of XIP during the
+ * flash write (a cache miss mid-erase used to hardfault), the module offset
+ * computation was corrected, and save_pending() reports unsaved changes.
  * 
  * Config is stored in last sector of flash
  */

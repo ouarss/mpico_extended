@@ -1,4 +1,4 @@
-/* Delta over base.css: the pieces specific to the Mai Pico monitor -
+/* Delta over base.css: the pieces specific to the MPico Extended monitor -
    electrode/zone cards with a threshold marker, the trace canvas, and the
    signal-processing controls. Everything else is inherited from base.css. */
 
@@ -48,6 +48,7 @@
   .sidebar-collapsed .nav button { justify-content: center; padding: 8px; }
   .sidebar-collapsed .nav button span { display: none; }
   .sidebar-collapsed .sidebar-status { display: none; }
+  .sidebar-collapsed .sidebar-credit { display: none; }
   /* The unsaved chip survives the collapsed rail as a bare breathing dot. */
   .sidebar-collapsed .sidebar-save { justify-content: center; padding: 7px 0; }
   .sidebar-collapsed .sidebar-save .save-text { display: none; }
@@ -330,7 +331,7 @@
 .nav button.locked:hover { background: none; color: var(--muted); }
 
 /* The active board-driven section is hidden while the gate replaces it. In
-   maipico.css (after base.css) so it wins over ".section.active". */
+   mpico.css (after base.css) so it wins over ".section.active". */
 .section.gated { display: none; }
 
 /* "?" help affordance on each option and panel header */

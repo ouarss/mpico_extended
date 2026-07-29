@@ -3,18 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Mai Pico Monitor</title>
+<title>MPico Extended Monitor</title>
 <!-- Inline icon, so a file:// page does not log an "unsafe attempt to load
      URL" for a missing /favicon.ico. -->
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="assets/css/base.css">
-<link rel="stylesheet" href="assets/css/maipico.css">
+<link rel="stylesheet" href="assets/css/mpico.css">
 </head>
 <body>
 
 <nav class="sidebar">
   <div class="sidebar-top">
-    <div class="brand">Mai Pico<span>Touch monitor</span></div>
+    <div class="brand">MPico Extended<span>Touch monitor</span></div>
     <button type="button" id="sidebar-toggle" class="sidebar-toggle"
             aria-label="Collapse sidebar" title="Collapse sidebar">
       <svg class="sidebar-toggle-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -69,6 +69,13 @@
     <button type="button" id="connect" class="primary wide" hidden>Connect</button>
     <button type="button" id="disconnect" class="wide" hidden>Disconnect</button>
   </div>
+
+  <div class="sidebar-credit">
+    Built on <a href="https://github.com/whowechina/mai_pico" target="_blank"
+      rel="noopener">mai_pico</a> by whowechina. Modified version, not official.<br>
+    <a href="https://github.com/ouarss/mpico_extended" target="_blank"
+      rel="noopener">Source code, GPL-3.0</a>
+  </div>
 </nav>
 
 <div class="content">
@@ -122,9 +129,10 @@
           <p><strong>First time? Four steps:</strong></p>
           <ol class="info-steps">
             <li><strong>Flash the firmware</strong>:
-              <a class="dl-btn" href="firmware/mai_pico.uf2" download>
+              <a class="dl-btn" href="https://github.com/ouarss/mpico_extended/releases/latest/download/mpico_extended.uf2">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
                 Download the firmware (UF2)</a>
+              <a class="src-link" href="https://github.com/ouarss/mpico_extended">Source code (GPL-3.0)</a>
               then hold the BOOTSEL button while plugging the Pico (or use
               Console: Reset Bootloader on a board already running it), and
               drop the file on the RPI-RP2 drive that appears. The board reboots
@@ -157,6 +165,21 @@
           </ul>
           <p>Everything else in this Information tab explains how detection
             works and how to fight false triggers, with real numbers.</p>
+
+          <div class="info-credit">
+            <p><strong>Credits.</strong> This firmware is built on
+              <a href="https://github.com/whowechina/mai_pico" target="_blank"
+                rel="noopener">mai_pico</a> by whowechina, whose original work
+              made all of this possible. What runs on your board is a
+              <strong>modified version</strong> aimed at full-size playfields.
+              It is not an official release and is not affiliated with that
+              project, so please do not report anything you see here to them.</p>
+            <p>Released under <strong>GPL-3.0</strong>, like the firmware it
+              derives from.
+              <a href="https://github.com/ouarss/mpico_extended" target="_blank"
+                rel="noopener">Source code</a>. Non-commercial use only: the
+              linked aic_pico module is CC BY-NC 4.0.</p>
+          </div>
         </article>
 
         <article data-topic="hardware">
@@ -312,7 +335,7 @@ delta = 900 - 815        0            85     0 at rest, RISES when touched</pre>
 
         <article data-topic="compare">
           <h2>Old vs new detection</h2>
-          <p>The stock Mai Pico firmware and this one decide a touch in
+          <p>The stock mai_pico firmware and this one decide a touch in
             fundamentally different places. <strong>This is not a setting</strong>
             - the new way is now the only way; there is no switch back.</p>
 
@@ -588,7 +611,7 @@ noise       7  #                        -&gt; ignored, too small and too brief</
             further click.</p>
           <p>Each visit writes one file, named for the moment it started. Files
             are filed by date:
-            <code>&lt;folder&gt;/YYYY/MM/maipico-session-...csv</code>, one folder
+            <code>&lt;folder&gt;/YYYY/MM/mpico-session-...csv</code>, one folder
             per year, then per month. The file grows as the session runs: new
             samples are appended about once a minute, and once more when the board
             is unplugged or the page is closed.</p>
@@ -627,11 +650,11 @@ noise       7  #                        -&gt; ignored, too small and too brief</
           <p>This page talks to the board over <strong>WebSerial</strong>, so it
             needs Chrome or Edge. Press <em>Connect</em> and pick the board in
             the browser prompt.</p>
-          <p>The Mai Pico exposes several USB interfaces. Choose the one labelled
+          <p>The board exposes several USB interfaces. Choose the one labelled
             <strong>Command Line</strong> (the <code>.2</code> interface) -
             not the game input interface. Its USB id is
             <code>VID 0ca3 / PID 0021</code>.</p>
-          <p>Once connected, the command prompt is <code>mai_pico&gt;</code>. The
+          <p>Once connected, the command prompt is <code>mpico&gt;</code>. The
             page sends <code>feed on</code> automatically, which starts the live
             frames and makes the board republish its configuration. Use
             <em>Disconnect</em> to hand the port back cleanly before opening it
