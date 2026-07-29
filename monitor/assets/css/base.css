@@ -84,8 +84,32 @@ body {
   font-size: 11px;
   line-height: 1.5;
 }
-.sidebar-credit a { color: var(--muted); text-decoration: underline; }
-.sidebar-credit a:hover { color: var(--text); }
+.sidebar-credit p { margin: 0 0 8px; }
+
+/* Repository button: same shape wherever a repo is linked, so the original
+   project and this one always look like the pair they are. */
+.svg-sprite { display: none; }
+.gh-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  text-decoration: none;
+  vertical-align: middle;
+}
+.gh-btn:hover {
+  border-color: var(--muted);
+  background: rgba(255, 255, 255, .04);
+  color: var(--text);
+}
+.gh-ico { width: 14px; height: 14px; flex: none; fill: currentColor; }
+
+/* In the sidebar they stack full width; in an article they sit side by side. */
+.sidebar-credit .gh-btn { display: flex; margin-top: 6px; }
+.gh-btn-row { display: flex; flex-wrap: wrap; gap: 10px; }
 .wide { width: 100%; text-align: center; }
 
 /* --- Sections ----------------------------------------------------------- */
@@ -476,17 +500,6 @@ button:hover { border-color: var(--accent); }
 .dl-btn:hover { background: rgba(61, 220, 132, .22); }
 .dl-btn svg { width: 15px; height: 15px; flex: none; }
 
-/* Sits next to .dl-btn: the GPL requires the source to be offered from the same
-   place as the binary, so this link travels with the download button. */
-.src-link {
-  margin-left: 10px;
-  color: var(--muted);
-  font-size: .88em;
-  text-decoration: underline;
-  vertical-align: middle;
-}
-.src-link:hover { color: var(--text); }
-
 /* Always-at-hand save, visible from every tab: an amber chip in the sidebar
    with a breathing dot. Quietly present, never blocking. */
 .sidebar-save {
@@ -691,6 +704,9 @@ button:hover { border-color: var(--accent); }
 .info-credit p { margin: 0 0 8px; }
 .info-credit p:last-child { margin-bottom: 0; }
 .info-credit a { color: var(--accent); text-decoration: underline; }
+/* Buttons keep their own look: an article's link styling would underline them. */
+.info-credit .gh-btn { color: var(--muted); text-decoration: none; }
+.info-credit .gh-btn:hover { color: var(--text); }
 
 .info-content ol,
 .info-content ul {
