@@ -220,6 +220,7 @@ for a stock one.
 | This firmware and the upstream code it derives from (`src/`) | **GPL-3.0**, see `LICENSE` |
 | `monitor/` (original work) | GPL-3.0, as part of this repository |
 | `aic_pico`, linked at build time | CC BY-NC 4.0, upstream |
+| `pico_sdk_import.cmake` (copied from the Pico SDK) and `src/tusb_config.h` / `src/usb_descriptors.c` (TinyUSB-derived) | BSD-3-Clause / MIT, notices kept in the files |
 | Upstream hardware (PCB, CAD, docs), **not** used here | CC BY-NC 4.0, upstream |
 
 Two points worth stating plainly:
