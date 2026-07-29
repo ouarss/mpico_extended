@@ -1,0 +1,43 @@
+# Publishes monitor/ as the GitHub Pages site, so the tool is reachable over
+# HTTPS. WebSerial needs a secure context, and the page is fully static: there
+# is nothing to build, the folder is uploaded as-is.
+#
+# Requires Pages to be enabled with "GitHub Actions" as the source, which on a
+# free plan means the repository must be public.
+#
+# Runs on any push touching monitor/, so the published site can never drift
+# from the repository.
+name: Deploy monitor to Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'monitor/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never run two deployments at once, but let a running one finish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: monitor
+      - id: deployment
+        uses: actions/deploy-pages@v4
