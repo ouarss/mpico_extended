@@ -9,3 +9,7 @@ modules/
 
 # Artefact de build (regenere par build.sh)
 mai_pico.uf2
+
+# Exception : l'UF2 livre avec le monitor (lien de telechargement du Start
+# here). A rafraichir a chaque evolution du firmware.
+!monitor/firmware/mai_pico.uf2

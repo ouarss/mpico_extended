@@ -48,6 +48,9 @@
   .sidebar-collapsed .nav button { justify-content: center; padding: 8px; }
   .sidebar-collapsed .nav button span { display: none; }
   .sidebar-collapsed .sidebar-status { display: none; }
+  /* The unsaved chip survives the collapsed rail as a bare breathing dot. */
+  .sidebar-collapsed .sidebar-save { justify-content: center; padding: 7px 0; }
+  .sidebar-collapsed .sidebar-save .save-text { display: none; }
 }
 @media (max-width: 1100px) {
   .sidebar-toggle { display: none; }
@@ -253,12 +256,6 @@
 .proc small { color: var(--muted); font-size: 11px; line-height: 1.45; }
 .proc-detail { color: var(--accent) !important; font: 11px/1.4 var(--mono); }
 
-/* Presets is a reset-like action, set it apart with a warning tint. */
-.proc.proc-reset {
-  background: rgba(255, 176, 0, 0.07);
-  border-color: rgba(255, 176, 0, 0.35);
-}
-
 /* Give the Tuning and Board number inputs the same look as the Mapping inputs
    (base.css styles those by class; these tabs are not in that list). Widths
    stay as set by the more specific rules above/below. */
@@ -289,6 +286,32 @@
    its red fill (the id selector wins over the base .pad.selected fill). */
 #live-disc .pad.selected { stroke: var(--accent); stroke-width: 2.5; }
 #live-disc .pad.touched { fill: var(--hot); }
+
+/* Auto-calibration step 2: a compact copy of the Live playfield so the user
+   sees which physical pad to press. The targeted zone is filled in accent; a
+   landing touch still turns red (the .touched rule follows, so it wins the
+   fill when a pad is both targeted and pressed). */
+.calib-press-disc-wrap { margin: 12px 0 4px; text-align: center; }
+.calib-press-disc { max-width: 270px; }
+.calib-press-disc-hint { margin: 6px 0 0; }
+
+/* Step 2 two-column block: the targeted-zone disc on the left, sized to the
+   circle and never past half width, with the position / strip / actions stacked
+   on the right. Collapses to one column on the same breakpoint as .split. */
+.calib-press-split {
+  grid-template-columns: minmax(0, min(50%, 300px)) minmax(0, 1fr);
+  margin: 12px 0;
+}
+.calib-press-split .calib-press-disc-wrap { margin: 0; }
+.calib-press-side { min-width: 0; }
+.calib-press-side .actions { margin-top: 4px; }
+@media (max-width: 1100px) {
+  .calib-press-split { grid-template-columns: 1fr; }
+}
+#calib-press-disc .pad.target { fill: var(--accent); stroke: var(--accent); stroke-width: 2; }
+#calib-press-disc .pad.touched { fill: var(--hot); stroke: var(--hot); }
+#calib-press-disc .pad.target + .label,
+#calib-press-disc .pad.touched + .label { fill: #fff; font-weight: 600; }
 @media (min-width: 1101px) {
   [data-section="live"] .split { grid-template-columns: minmax(0, 540px) minmax(0, 1fr); }
 }
@@ -594,6 +617,59 @@ h2 .opt-info { margin-left: 6px; vertical-align: middle; }
 .profile-params dt { color: var(--muted); font-size: 12px; }
 .profile-params dd { margin: 0; font: 12px/1.4 var(--mono); color: var(--text); text-align: right; }
 
+/* --- Compact zone grids (Tuning thresholds, Mapping) -------------------- */
+
+/* Replaces the old 34-row zone-table: small cells grouped by family so the
+   controls stay about as tall as the disc they sit beside. */
+.zgrid-group { margin-bottom: 12px; }
+.zgrid-group:last-child { margin-bottom: 0; }
+.zgrid-fam {
+  display: block;
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.zgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(66px, 1fr));
+  gap: 6px;
+}
+.zcell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 5px 6px 6px;
+  background: var(--sidebar);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+.zcell-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px;
+}
+.zcell-name { font-weight: 600; font-size: 12px; }
+.zcell-sc {
+  font: 10px/1 var(--mono);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.zcell input { width: 100%; padding: 4px 6px; }
+/* Step 2 actions: split the navigation trio from the terminal pair. */
+#calib-press-finish { margin-left: auto; }
+
+.zcell-foot { display: flex; align-items: center; gap: 6px; }
+/* Reuse the shared .deviation primitive plus the Live cards' threshold-marker
+   bar, sized to the cell: resting noise stays a sliver on the absolute scale
+   instead of a jumpy fill scaled to the threshold. */
+.zcell-foot .deviation { width: auto; min-width: 2ch; font-size: 11px; }
+.zcell-foot .cell-bar { flex: 1; min-width: 0; height: 5px; }
+.cell-bar .fill.over { background: var(--hot); }
+
 /* Commands reference table (Information tab) */
 .cmd-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .cmd-table td { padding: 3px 12px 3px 0; vertical-align: top; color: var(--text); line-height: 1.5; }
@@ -631,7 +707,7 @@ h2 .opt-info { margin-left: 6px; vertical-align: middle; }
   font-variant-numeric: tabular-nums;
 }
 .log-record-bar .readout-label { margin-left: 6px; }
-#log-record.recording { border-color: var(--hot); color: var(--hot); }
+#log-rec-toggle.recording { border-color: var(--hot); color: var(--hot); }
 
 /* --- Auto-calibration wizard -------------------------------------------- */
 
@@ -748,11 +824,61 @@ h2 .opt-info { margin-left: 6px; vertical-align: middle; }
   color: var(--text);
 }
 
-/* Result rows carry their status: risky in red, kept (unmeasured) dimmed. */
-.calib-table tr.risky td { color: var(--hot); }
-.calib-table tr.risky .zone-name { font-weight: 600; }
-.calib-table tr.kept td { color: var(--muted); }
 .calib-risky-word { color: var(--hot); }
+
+/* Step-3 results: the compact zone grid (reusing .zgrid / .zcell) with the
+   suggested threshold shown large and the measurements small below. Each cell
+   carries its status colour: ok (discreet green), risky (red), kept (dimmed). */
+.calib-res-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-bottom: 14px;
+  font-size: 11px;
+}
+.calib-res-legend-note { color: var(--muted); }
+.calib-res-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+.calib-res-key::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  border: 1px solid var(--line);
+}
+.calib-res-key.ok::before { border-color: var(--ok); background: rgba(61, 220, 132, .18); }
+.calib-res-key.risky::before { border-color: var(--hot); background: rgba(255, 92, 92, .18); }
+.calib-res-key.kept::before { opacity: .5; }
+
+.calib-rescell { gap: 3px; }
+.calib-rescell .zcell-top { align-items: baseline; }
+.calib-res-status {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--muted);
+}
+.calib-res-thr { font: 20px/1 var(--mono); color: var(--text); }
+.calib-res-meas {
+  font-size: 10px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.calib-rescell.ok { border-color: rgba(61, 220, 132, .45); }
+.calib-rescell.ok .calib-res-thr,
+.calib-rescell.ok .calib-res-status { color: var(--ok); }
+.calib-rescell.risky {
+  border-color: var(--hot);
+  background: rgba(255, 92, 92, .08);
+}
+.calib-rescell.risky .calib-res-thr,
+.calib-rescell.risky .calib-res-status { color: var(--hot); }
+.calib-rescell.kept { opacity: .55; }
 
 .calib-nav { margin-top: 16px; }
 
@@ -836,6 +962,7 @@ h2 .opt-info { margin-left: 6px; vertical-align: middle; }
 .calib-log-line + .calib-log-line { margin-top: 2px; }
 
 .calib-trace-wrap { margin-top: 14px; }
+.calib-verify-live { margin-top: 14px; }
 
 /* Sound toggle sits at the end of the advance row. */
 .calib-advance-row { flex-wrap: wrap; }
@@ -843,11 +970,10 @@ h2 .opt-info { margin-left: 6px; vertical-align: middle; }
 /* The one thing to read during a measurement: what to do right now. Everything
    else on the step is support material and stays visually quieter. */
 .calib-instruction {
-  margin: 0 0 12px;
+  margin: 14px 0 12px;
   padding: 14px 18px;
-  background: var(--well);
-  border-left: 4px solid var(--accent);
-  border-radius: 8px;
+  background: rgba(255, 88, 225, .08);
+  border-left: 4px solid #ff58e1;
   color: var(--text);
   font-size: 17px;
   font-weight: 600;

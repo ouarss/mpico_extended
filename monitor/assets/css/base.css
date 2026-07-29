@@ -191,6 +191,7 @@ button:hover { border-color: var(--accent); }
 
 .global input,
 .zone-table input,
+.zcell input,
 .console-form input,
 .map-controls input,
 .zone-dialog input[type="number"] {
@@ -204,6 +205,7 @@ button:hover { border-color: var(--accent); }
 }
 .global input:focus,
 .zone-table input:focus,
+.zcell input:focus,
 .console-form input:focus,
 .map-controls input:focus,
 .zone-dialog input[type="number"]:focus {
@@ -444,17 +446,86 @@ button:hover { border-color: var(--accent); }
 
 /* --- Save banner -------------------------------------------------------- */
 
+/* Firmware download button (Start here): an anchor dressed as a friendly
+   primary action. */
+.dl-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  margin: 2px 0;
+  background: rgba(61, 220, 132, .12);
+  border: 1px solid var(--ok);
+  border-radius: 7px;
+  color: var(--ok);
+  font-weight: 600;
+  text-decoration: none;
+  vertical-align: middle;
+}
+.dl-btn:hover { background: rgba(61, 220, 132, .22); }
+.dl-btn svg { width: 15px; height: 15px; flex: none; }
+
+/* Always-at-hand save, visible from every tab: an amber chip in the sidebar
+   with a breathing dot. Quietly present, never blocking. */
+.sidebar-save {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 12px;
+  background: rgba(255, 176, 0, .12);
+  border: 1px solid rgba(255, 176, 0, .45);
+  border-radius: 7px;
+  color: var(--warn);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+.sidebar-save:hover { border-color: var(--warn); }
+.save-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warn);
+  animation: save-dot-pulse 1.6s ease-in-out infinite;
+}
+@keyframes save-dot-pulse { 50% { opacity: .3; } }
+
+/* Pinned to the bottom of the viewport: appearing at the top of the flow used
+   to shift the whole view down. Solid backdrop under the amber tint so the
+   content scrolling behind stays unreadable through it. Slides in, then keeps
+   a slow glow pulse: visible without being an alarm. */
+@keyframes save-banner-in {
+  from { transform: translate(-50%, 14px); opacity: 0; }
+  to { transform: translate(-50%, 0); opacity: 1; }
+}
+@keyframes save-banner-pulse {
+  50% {
+    border-color: rgba(255, 176, 0, .95);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, .45), 0 0 16px rgba(255, 176, 0, .3);
+  }
+}
 .save-banner {
+  animation: save-banner-in .25s ease-out,
+             save-banner-pulse 2.6s ease-in-out .3s infinite;
+  position: fixed;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  z-index: 60;
+  width: min(680px, calc(100vw - 32px));
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
   padding: 12px 18px;
-  margin-bottom: 20px;
-  background: rgba(255, 176, 0, .12);
+  background: linear-gradient(rgba(255, 176, 0, .12), rgba(255, 176, 0, .12)), var(--panel);
   border: 1px solid rgba(255, 176, 0, .45);
   border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .45);
   color: var(--warn);
   font-size: 13px;
 }
@@ -462,11 +533,12 @@ button:hover { border-color: var(--accent); }
 
 /* --- Toast -------------------------------------------------------------- */
 
+/* Bottom right, so it never overlaps the save banner pinned bottom centre. */
 .toast {
   position: fixed;
-  top: 18px;
+  bottom: 18px;
   right: 18px;
-  z-index: 10;
+  z-index: 70;
   padding: 11px 22px;
   border-radius: 10px;
   font-size: 13px;
@@ -557,7 +629,7 @@ button:hover { border-color: var(--accent); }
   display: block;
   margin-top: 8px;
   padding: 8px 12px;
-  background: var(--well);
+  background: #04120e;
   border-left: 3px solid var(--ok);
   color: var(--muted);
   max-width: 100ch;
@@ -569,18 +641,19 @@ button:hover { border-color: var(--accent); }
   font-weight: 600;
 }
 
-/* Call-out for the "do not confuse this with that" notes. */
+/* Call-out for the "do not confuse this with that" notes. Violet, so it does
+   not read as an error or warning: it is a footnote, not an alarm. */
 .info-warn {
-  max-width: 72ch;
+  max-width: 100ch;
   margin: 0 0 14px;
   padding: 10px 14px;
-  background: rgba(255, 176, 0, .1);
-  border-left: 3px solid var(--warn);
+  background: rgba(255, 88, 225, .08);
+  border-left: 3px solid #ff58e1;
   border-radius: 0 8px 8px 0;
   color: var(--muted);
   line-height: 1.6;
 }
-.info-warn strong { color: var(--warn); }
+.info-warn strong { color: #ff58e1; }
 
 .info-content ol,
 .info-content ul {

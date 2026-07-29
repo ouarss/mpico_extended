@@ -28,7 +28,10 @@ const ENCODER = new TextEncoder();
 // Real firmware triggers, decided at 1 kHz and reported as `T` lines at feed
 // poll. Parsed here and pushed as events; the render loop in monitor.js drains
 // this queue (Last triggers panel, and the standby verify). Kept in the
-// transport so all line parsing lives in one place.
+// transport so all line parsing lives in one place. Bounded: the drain only
+// runs on rAF, which the browser pauses on a backgrounded tab, so an unbounded
+// queue would grow while hidden. The cap is far above any real poll batch.
+const TRIGGER_QUEUE_MAX = 500;
 const triggerQueue = [];
 
 /** Append with a rolling cap - one definition of the log semantics. */
@@ -117,6 +120,7 @@ function createParser(state, onUpdate) {
       if (Number.isInteger(zone) && zone >= 0 && zone < N_ZONES
         && Number.isFinite(count) && Number.isFinite(peak)) {
         triggerQueue.push({ zone, count, peak, at: performance.now() });
+        if (triggerQueue.length > TRIGGER_QUEUE_MAX) triggerQueue.shift();
         onUpdate();
       }
       return;

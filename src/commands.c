@@ -126,12 +126,17 @@ static void feed_publish_config()
 }
 
 // Common tail after any config change: persist, notify the monitor, echo the
-// section that changed.
+// section that changed. The monitor republish is DEFERRED to the next feed
+// poll: emitting the ~500-byte C line from inside a command handler stacks it
+// on the handler's own output and can overflow the CDC TX FIFO, truncating the
+// line mid-array (seen on `factory`, whose reset floods the console).
+static bool config_dirty = false;
+
 static void config_changed_and_show(void (*disp)())
 {
     config_changed();
     if (feeding) {
-        feed_publish_config();
+        config_dirty = true;
     }
     disp();
 }
@@ -901,10 +906,13 @@ void commands_feed_poll()
     }
     uint32_t now = board_millis();
 
-    // Keep the monitor's config view in sync, whatever changed it (2 Hz).
+    // Keep the monitor's config view in sync, whatever changed it: right away
+    // on a deferred change (next main-loop tick, once the command handler's
+    // own output has left the FIFO), and at 2 Hz as a safety net.
     static uint32_t last_cfg = 0;
-    if (now - last_cfg >= 500) {
+    if (config_dirty || now - last_cfg >= 500) {
         last_cfg = now;
+        config_dirty = false;
         feed_publish_config();
     }
 

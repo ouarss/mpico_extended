@@ -102,6 +102,7 @@ const els = {
   connect: document.getElementById('connect'),
   disconnect: document.getElementById('disconnect'),
   saveBanner: document.getElementById('save-banner'),
+  sidebarSave: document.getElementById('sidebar-save'),
   active: document.getElementById('active'),
   liveDisc: document.getElementById('live-disc'),
   spark: document.getElementById('spark'),
@@ -177,6 +178,7 @@ const els = {
   logReset: document.getElementById('log-reset'),
   logStatsCsv: document.getElementById('log-stats-csv'),
   logStatsJson: document.getElementById('log-stats-json'),
+  logRecToggle: document.getElementById('log-rec-toggle'),
   logRecord: document.getElementById('log-record'),
   logRecState: document.getElementById('log-rec-state'),
   logRecCount: document.getElementById('log-rec-count'),
@@ -703,15 +705,17 @@ function drawGlobalSpark(canvas) {
   }
 }
 
-function buildGlobalLegend() {
-  if (!els.sparkAllLegend) return;
-  els.sparkAllLegend.textContent = '';
+// One colour chip per zone, built into any container: the Live all-zones trace
+// and the wizard's step-1 and step-4 copies share the same legend.
+function buildGlobalLegend(target = els.sparkAllLegend) {
+  if (!target) return;
+  target.textContent = '';
   zones.forEach((zone, z) => {
     const item = document.createElement('span');
     const dot = document.createElement('i');
     dot.style.background = zoneColor(z);
     item.append(dot, document.createTextNode(zone));
-    els.sparkAllLegend.appendChild(item);
+    target.appendChild(item);
   });
 }
 
@@ -744,6 +748,7 @@ function drainTriggerEvents() {
     if (calib.phase === 'verify') {
       calib.verifyTrig[ev.zone] += ev.count;
       if (ev.peak > calib.verifyPeak[ev.zone]) calib.verifyPeak[ev.zone] = ev.peak;
+      calib.verifyLiveDirty = true;
     }
   }
   triggerQueue.length = 0;
@@ -824,7 +829,7 @@ const OPTION_HELP = {
       one odd instant stops mattering. The cost is that you learn it a moment
       later.</p>
       <p class="info-example"><b>Example</b> - readings 5, 6, <b>60</b>, 5 (that 60 is a noise
-      spike). With avg&nbsp;1 the firmware sees 60 and may fire. With avg&nbsp;4
+      spike). With avg 1 the firmware sees 60 and may fire. With avg 4
       it sees (5+6+60+5)/4 = <b>19</b>: no trigger.</p>
       <pre class="info-diagram">frames        1    2    3    4
 raw           5    6   60    5    one noise spike of 60
@@ -843,7 +848,7 @@ avg 4         5    5   19   19    diluted: (5+6+60+5) / 4 = 19</pre>
       <b>on</b>. <b>off</b> = how many readings below the release level before
       it turns <b>off</b>. Noise is brief and never repeats cleanly; a real
       finger holds for many readings.</p>
-      <p class="info-example"><b>Example</b> - with <b>on&nbsp;3</b>, a spike lasting 1 reading is
+      <p class="info-example"><b>Example</b> - with <b>on 3</b>, a spike lasting 1 reading is
       ignored (it never reaches 3 in a row), while your finger, present for
       dozens of readings, passes easily.</p>
       <pre class="info-diagram">readings above the threshold, in a row (debounce on = 3):
@@ -851,17 +856,17 @@ noise spike   X . . .          only 1  -> dropped
 real finger   X X X X X ...    3rd one -> ON</pre>
       <p><b>Symptom &rarr; fix:</b> phantom clicks while nobody touches the
       glass &rarr; raise <b>on</b> to 2-4 to smooth them out; <b>cost:</b> each
-      step delays a real press (~3&nbsp;ms per step, see below). A held press
+      step delays a real press (~3 ms per step, see below). A held press
       drops out for an instant &rarr; raise <b>off</b> to 4-6; that one is
       nearly free, a late release is not felt.</p>
       <p>Note: an electrode is re-read every 3rd frame (the three chips take
-      turns), so <b>one debounce step is about 3&nbsp;ms</b>.</p>`,
+      turns), so <b>one debounce step is about 3 ms</b>.</p>`,
   },
   gain: {
     title: 'Gain (CDC / CDT)',
     body: `<p><b>In one line:</b> the microphone volume of the sensor. Louder
       signal, but louder hiss too.</p>
-      <p>Why not 0? CDC/CDT are not something to minimise &mdash; they power the
+      <p>Why not 0? CDC/CDT are not something to minimise - they power the
       measurement itself. At 0 no charge is injected and nothing is measured
       (0 means &laquo; disabled &raquo; in the chip). 16 uA / 0.5 us sit
       mid-range and give a healthy reading; auto-config then trims the current
@@ -893,7 +898,7 @@ gain x2      80     16        5 : 1   same ratio, bigger numbers</pre>
      more averaging = smoother, but older, value</pre>
       <p><b>FFI</b> - readings averaged per sample (0=6, 1=10, 2=18, 3=34).<br>
       <b>SFI</b> - a second averaging pass (0=4, 1=6, 2=10, 3=18).<br>
-      <b>ESI</b> - the wait between samples, 0=1&nbsp;ms up to 7=128&nbsp;ms.
+      <b>ESI</b> - the wait between samples, 0=1 ms up to 7=128 ms.
       This is the cheapest way to fight noise: spreading samples over time
       averages it out without extra work.</p>
       <p><b>Combinations to try:</b></p>
@@ -936,15 +941,6 @@ delta        0    0    2    0 ...  stays ~0 until a real touch</pre>
       latency. <b>Set idle level</b> re-seeds the zero immediately - do it after
       moving the cabinet or changing the wiring, with nothing on the glass.</p>`,
   },
-  presets: {
-    title: 'Presets',
-    body: `<p><b>Default</b> puts the processing values back to the recommended
-      set. <b>Flat threshold</b> writes one value on all 34 zones - a quick
-      starting point before fine-tuning. <b>Set idle level</b> re-seeds the
-      resting reference from the current (untouched) readings.</p>
-      <p>Nothing here reaches flash until you <b>Save to flash</b>: unplug the
-      board and a bad experiment is gone.</p>`,
-  },
   threshold: {
     title: 'Per-zone threshold',
     body: `<p><b>In one line:</b> how hard a zone must be pushed to count as
@@ -962,12 +958,18 @@ delta        0    0    2    0 ...  stays ~0 until a real touch</pre>
    10 ~~~~~~~~~~~ sustained noise stays below
     0 ___________
  too low (10) fires alone - too high (110) misses taps</pre>
-      <p><b>The rule:</b> place it just above that zone's <b>sustained</b>
-      noise, not above its rare spikes - then let <b>debounce</b> kill the
-      spikes. That way the threshold stays low enough to catch a light, fast
-      press.</p>
+      <p><b>The rule:</b> place it midway between that zone's <b>sustained</b>
+      noise and its fast in-game taps, not right on top of the noise. Between two
+      rapid taps a hovering finger keeps a residual delta above the noise; a
+      threshold set too low leaves the release margin (OFF) under that residual,
+      so the zone never lets go during a spam. The midpoint keeps OFF clear of
+      the hovering finger while staying well under a real tap, and <b>debounce</b>
+      still kills brief spikes.</p>
       <p>Watch the zone's bar or its trace to place it, or let
-      <b>Auto Calibration</b> measure both numbers for you.</p>`,
+      <b>Auto Calibration</b> measure both numbers for you.</p>
+      <p><b>Quick start:</b> the <b>All zones</b> control above the table writes
+      one value onto every zone at once - a flat starting point before you
+      fine-tune each one.</p>`,
   },
   level: {
     title: 'Brightness (level)',
@@ -1160,7 +1162,6 @@ function buildProcessing() {
     () => send(`filter ${proc.ffi.value} ${proc.sfi.value} ${proc.esi.value}`));
 
   buildBaselineControl();
-  buildPresetControl();
 }
 
 function buildBaselineControl() {
@@ -1195,60 +1196,24 @@ function buildBaselineControl() {
   rate.append(rateLabel, proc.rate);
   box.appendChild(rate);
 
-  const hint = document.createElement('small');
-  hint.innerHTML = 'Hardware: the MPR121 tracks it internally.<br>'
-    + 'Software: the firmware tracks it, at the rate below.<br>'
-    + 'Either way, frozen while a zone is held.';
-  box.appendChild(hint);
-  els.processing.appendChild(box);
-}
-
-function buildPresetControl() {
-  const box = document.createElement('div');
-  box.className = 'proc proc-reset';
-  box.appendChild(procHead('Presets', 'presets'));
-
-  const btns = document.createElement('div');
-  btns.className = 'proc-btns';
-  const def = document.createElement('button');
-  def.type = 'button';
-  def.textContent = 'Default';
-  def.addEventListener('click', () => {
-    send('preset default');
-    notify('Default preset applied - use Save to flash to keep it', 'warn');
-  });
-  const rebase = document.createElement('button');
-  rebase.type = 'button';
-  rebase.textContent = 'Set idle level';
-  rebase.addEventListener('click', () => {
+  // Re-seed the resting reference now, from the current (untouched) readings.
+  const idle = document.createElement('div');
+  idle.className = 'proc-btns';
+  const idleBtn = document.createElement('button');
+  idleBtn.type = 'button';
+  idleBtn.textContent = 'Set idle level';
+  idleBtn.addEventListener('click', () => {
     send('rebase');
     notify('Idle level set from the current readings');
   });
-  btns.append(def, rebase);
-  box.appendChild(btns);
-
-  const flat = document.createElement('div');
-  flat.className = 'proc-flat';
-  const flatInput = document.createElement('input');
-  flatInput.type = 'number';
-  flatInput.min = 1;
-  flatInput.max = 1000;
-  flatInput.value = 35;
-  flatInput.addEventListener('focus', () => { editing = flatInput; });
-  flatInput.addEventListener('blur', () => { editing = null; });
-  const flatBtn = document.createElement('button');
-  flatBtn.type = 'button';
-  flatBtn.textContent = 'Flat threshold';
-  flatBtn.addEventListener('click', () => {
-    send(`preset flat ${flatInput.value}`);
-    notify(`Every zone set to ${flatInput.value}`);
-  });
-  flat.append(flatInput, flatBtn);
-  box.appendChild(flat);
+  idle.appendChild(idleBtn);
+  box.appendChild(idle);
 
   const hint = document.createElement('small');
-  hint.textContent = 'Default restores the recommended processing values; Flat '
-    + 'sets one threshold on every zone.';
+  hint.innerHTML = 'Hardware: the MPR121 tracks it internally.<br>'
+    + 'Software: the firmware tracks it, at the rate below.<br>'
+    + 'Either way, frozen while a zone is held. '
+    + 'Set idle level re-seeds the reference now.';
   box.appendChild(hint);
   els.processing.appendChild(box);
 }
@@ -1952,67 +1917,107 @@ els.profileDialogClose.addEventListener('click', () => els.profileDialog.close()
 
 const rowRefs = new Map();   // zone -> { thresholdInput, mappingInput, cells }
 
-function buildZoneRow(zone, value, min, max, extraCell, onCommit) {
-  const row = document.createElement('tr');
-  row.dataset.zone = zone;
+// One compact cell: zone name (plus an optional top-right extra for mapping's
+// sensor:channel), an editable number, and a live delta / gauge foot. Same refs
+// shape as the old table row, so refreshConfig and the per-frame paint below are
+// untouched. `cell.deviation` shows the live delta; `cell.gauge` is its bar.
+function buildZoneCell(zone, value, min, max, withExtra, onCommit) {
+  const cell = document.createElement('div');
+  cell.className = 'zcell';
+  cell.dataset.zone = zone;
 
-  const name = document.createElement('td');
+  const top = document.createElement('div');
+  top.className = 'zcell-top';
+  const name = document.createElement('span');
+  name.className = 'zcell-name';
   name.textContent = zone;
-  name.className = 'zone-name';
+  top.appendChild(name);
+  const extra = withExtra ? document.createElement('span') : null;
+  if (extra) { extra.className = 'zcell-sc'; top.appendChild(extra); }
+  cell.appendChild(top);
 
-  const valueCell = document.createElement('td');
   const input = editableNumber(value, min, max, onCommit);
-  valueCell.appendChild(input);
+  cell.appendChild(input);
 
-  const extra = extraCell ? document.createElement('td') : null;
-  if (extra) extra.className = 'deviation';
-
-  const deviation = document.createElement('td');
+  // Same bar model as the Live cards: absolute barScale with a threshold
+  // marker, so resting noise reads as a sliver instead of a jumpy fill
+  // scaled to the threshold.
+  const foot = document.createElement('div');
+  foot.className = 'zcell-foot';
+  const deviation = document.createElement('span');
   deviation.className = 'deviation';
-
-  const gauge = document.createElement('td');
-  gauge.innerHTML = '<div class="gauge"><span></span></div>';
-
-  if (extra) row.append(name, valueCell, extra, deviation, gauge);
-  else row.append(name, valueCell, deviation, gauge);
+  const bar = document.createElement('div');
+  bar.className = 'cell-bar';
+  const fill = document.createElement('span');
+  fill.className = 'fill';
+  const mark = document.createElement('span');
+  mark.className = 'mark';
+  bar.append(fill, mark);
+  foot.append(deviation, bar);
+  cell.appendChild(foot);
 
   return {
-    row,
+    root: cell,
     input,
     extra,
-    cell: { deviation, gauge: gauge.querySelector('span') },
+    cell: { deviation, fill, mark },
   };
 }
 
-function buildThresholdTable(cfg) {
-  els.thresholdRows.textContent = '';
+// Lay the 34 zones out as small cells grouped by family (A1-A8, B1-B8, C1-C2,
+// D1-D8, E1-E8), each family under its own label. `build(zone, z)` returns the
+// cell root to place. Zones are already in family order, so a new group opens
+// whenever the leading letter changes.
+function buildZoneGrid(container, build) {
+  container.textContent = '';
+  let currentFamily = null;
+  let grid = null;
   zones.forEach((zone, z) => {
-    const built = buildZoneRow(zone, cfg.thr[z], 1, 1000, false,
+    const family = zone[0];
+    if (family !== currentFamily) {
+      currentFamily = family;
+      const group = document.createElement('div');
+      group.className = 'zgrid-group';
+      const heading = document.createElement('span');
+      heading.className = 'zgrid-fam';
+      heading.textContent = `Group ${family}`;
+      group.appendChild(heading);
+      grid = document.createElement('div');
+      grid.className = 'zgrid';
+      group.appendChild(grid);
+      container.appendChild(group);
+    }
+    grid.appendChild(build(zone, z));
+  });
+}
+
+function buildThresholdTable(cfg) {
+  buildZoneGrid(els.thresholdRows, (zone, z) => {
+    const built = buildZoneCell(zone, cfg.thr[z], 1, 1000, false,
       (v) => send(`thr ${zone} ${v}`));
-    els.thresholdRows.appendChild(built.row);
     rowRefs.set(zone, { thresholdInput: built.input, cells: [built.cell] });
+    return built.root;
   });
 }
 
 function buildMappingTable(cfg) {
-  els.mappingRows.textContent = '';
-  zones.forEach((zone, z) => {
+  buildZoneGrid(els.mappingRows, (zone, z) => {
     const electrode = zoneToElectrode[z];
     // The number is the electrode (0..35); committing sends its sensor/channel.
-    const built = buildZoneRow(zone, electrode < 0 ? '' : electrode, 0, N_E - 1, true,
+    const built = buildZoneCell(zone, electrode < 0 ? '' : electrode, 0, N_E - 1, true,
       (v) => {
         const e = Number(v);
         if (!Number.isInteger(e) || e < 0 || e >= N_E) return;
         send(`touch ${Math.floor(e / PER_SENSOR)} ${e % PER_SENSOR} ${zone}`);
       });
     built.extra.textContent = electrode < 0 ? '-' : sensorChannel(electrode);
-    els.mappingRows.appendChild(built.row);
 
     const refs = rowRefs.get(zone) || {};
     refs.mappingInput = built.input;
     refs.mappingExtra = built.extra;
     refs.cells = [...(refs.cells || []), built.cell];
     rowRefs.set(zone, refs);
+    return built.root;
   });
 }
 
@@ -2030,6 +2035,7 @@ function refreshConfig(cfg) {
   });
 
   els.saveBanner.hidden = cfg.saved;
+  els.sidebarSave.hidden = cfg.saved;
 
   if (first) {
     buildProcessing();
@@ -2084,6 +2090,9 @@ function refreshConfig(cfg) {
 
 const thrPads = new Map();
 const mapPads = new Map();
+// Zone -> pad on the auto-calibration step-2 playfield copy (its own instance,
+// independent of the Live / Tuning / Mapping discs).
+const calibPressPads = new Map();
 
 // Frames a single firmware trigger must be held continuously before a zone is
 // remapped. The render pipeline runs at ~25 Hz, so ~35 frames is about 1.5 s -
@@ -2284,8 +2293,10 @@ function consoleHtml(lines) {
 
 // --- Logs (live per-zone stats + session recording) ------------------------
 
-// Recording is bounded so a forgotten session cannot grow without limit:
-// 30000 samples is ~20 min at the ~25 Hz display rate.
+// Recording is started explicitly (Start/Stop button) and bounded so a
+// forgotten session cannot grow without limit: 30000 samples is ~20 min at
+// the ~25 Hz display rate. The live per-zone stats, by contrast, always run:
+// they are a handful of numbers, not a sample stream.
 const LOG_MAX_SAMPLES = 30000;
 const LOG_RENDER_MS = 300;   // stats table / status refresh cadence (~3x/s)
 
@@ -2298,7 +2309,7 @@ const logStats = Array.from({ length: N_Z }, () => ({
 const logPrevActive = new Array(N_Z).fill(false);
 const logRows = [];   // per-zone cell refs, index = zone position
 
-const recording = { startedAt: 0, startIso: '', samples: [] };
+const recording = { active: false, startedAt: 0, startIso: '', samples: [] };
 let logLastRender = 0;
 
 function buildLogTable() {
@@ -2342,7 +2353,7 @@ function logFrame(data) {
     logPrevActive[z] = active;
   }
 
-  recordSample(data);   // always record while connected (render gates on config)
+  recordSample(data);   // no-op unless recording was started (Start button)
 
   // Stats collect every frame; the table itself only repaints when visible.
   const now = performance.now();
@@ -2354,6 +2365,7 @@ function logFrame(data) {
 }
 
 function recordSample(data) {
+  if (!recording.active) return;
   if (!recording.samples.length) {
     recording.startedAt = performance.now();
     recording.startIso = new Date().toISOString();
@@ -2400,11 +2412,35 @@ function updateRecordStatus() {
   els.logRecCount.textContent = n;
   const ms = n > 1 ? recording.samples[n - 1].t - recording.samples[0].t : 0;
   els.logRecDuration.textContent = `${(ms / 1000).toFixed(1)} s`;
-  els.logRecState.textContent = config ? 'recording' : 'waiting for board';
+  els.logRecState.textContent = !recording.active ? (n ? 'stopped' : 'off')
+    : (config ? 'recording' : 'waiting for board');
+  els.logRecToggle.textContent = recording.active ? 'Stop recording' : 'Start recording';
+  els.logRecToggle.classList.toggle('recording', recording.active);
 }
 
-// The session log records continuously while connected (rolling window); Clear
-// starts a fresh window.
+// Start opens a fresh session: new sample clock, and (when auto-save is on) a
+// fresh dated file, so one recording = one file on disk. Stop freezes the
+// samples: they stay exportable until the next Start or Clear.
+function toggleRecording() {
+  if (recording.active) {
+    recording.active = false;
+    flushAutoSave();   // write the tail of the session to disk now
+    updateRecordStatus();
+    notify('Recording stopped');
+    return;
+  }
+  recording.active = true;
+  recording.samples = [];
+  recording.startedAt = performance.now();
+  recording.startIso = new Date().toISOString();
+  autoSave.lastSampleT = -1;
+  autoSave.fileName = '';
+  autoSave.headerWritten = false;
+  updateRecordStatus();
+  notify('Recording started');
+}
+
+// Clear empties the current session (running or stopped) and restarts its clock.
 function clearLog() {
   recording.samples = [];
   recording.startedAt = performance.now();
@@ -2511,6 +2547,7 @@ function exportStatsJson() {
 els.logReset.addEventListener('click', resetLogStats);
 els.logStatsCsv.addEventListener('click', exportStatsCsv);
 els.logStatsJson.addEventListener('click', exportStatsJson);
+els.logRecToggle.addEventListener('click', toggleRecording);
 els.logRecord.addEventListener('click', clearLog);
 els.logSessionCsv.addEventListener('click', exportSessionCsv);
 els.logSessionJson.addEventListener('click', exportSessionJson);
@@ -2548,8 +2585,9 @@ const autoSave = {
   warned: false,            // notify a write failure only once
 };
 
-// A page-session write is never blocked on connection: samples accumulate in
-// `recording` regardless of the visible tab, so the timer alone drives writes.
+// A write is never blocked on connection: while recording is on, samples
+// accumulate in `recording` regardless of the visible tab, so the timer alone
+// drives writes.
 
 function idbOpen() {
   return new Promise((resolve, reject) => {
@@ -2591,7 +2629,7 @@ async function idbDeleteHandle() {
 }
 
 // Freeze the file name and its year/month folder on the first sample of this
-// page session, so the whole session lands in one dated file.
+// recording, so each recording lands in its own dated file.
 function initAutoSaveFile() {
   const d = new Date();
   const p = (n) => String(n).padStart(2, '0');
@@ -2788,6 +2826,7 @@ const CALIB_PARAM_DEFAULTS = { debounceOn: 3, debounceOff: 3, avg: 2, hyst: 25 }
 
 const calib = {
   phase: 'idle',        // 'idle' | 'noise' | 'press' | 'results'
+  restorePending: null, // globals to re-apply after a disconnect mid step-1
   noiseCeil: new Array(N_Z).fill(0),
   noiseP95: new Array(N_Z).fill(0),
   pressPeak: new Array(N_Z).fill(null),   // null = zone not measured
@@ -2814,6 +2853,7 @@ const calib = {
   verifyCeil: new Array(N_Z).fill(0),   // delta ceiling over the verify window
   verifyTrig: new Array(N_Z).fill(0),   // real firmware triggers (T) during verify
   verifyPeak: new Array(N_Z).fill(0),   // strongest T peak during verify
+  verifyLiveDirty: false,               // repaint the live triggered-zones list
   verifyEndsAt: 0,
   verifyAdjust: [],     // pending {zone,current,suggested,dir,reason,warn}
   reverify: { active: false, pass: 0 }, // Apply & re-verify loop state
@@ -2846,6 +2886,7 @@ const cel = {
   traceAllWrap: document.getElementById('calib-trace-all-wrap'),
   traceAll: document.getElementById('calib-trace-all'),
   pressTrace: document.getElementById('calib-press-trace'),
+  pressDisc: document.getElementById('calib-press-disc'),
   sound: document.getElementById('calib-sound'),
   mapAlert: document.getElementById('calib-map-alert'),
   mapAlertText: document.getElementById('calib-map-alert-text'),
@@ -2875,6 +2916,11 @@ const cel = {
   verifyProgress: document.getElementById('calib-verify-progress'),
   verifyBar: document.getElementById('calib-verify-bar'),
   verifyCount: document.getElementById('calib-verify-count'),
+  verifyLive: document.getElementById('calib-verify-live'),
+  verifyTraceAll: document.getElementById('calib-verify-trace-all'),
+  verifyLiveEmpty: document.getElementById('calib-verify-live-empty'),
+  verifyLiveWrap: document.getElementById('calib-verify-live-wrap'),
+  verifyLiveRows: document.getElementById('calib-verify-live-rows'),
   verifyResults: document.getElementById('calib-verify-results'),
   verifySummary: document.getElementById('calib-verify-summary'),
   verifyRows: document.getElementById('calib-verify-rows'),
@@ -3041,6 +3087,7 @@ function calibReset() {
   cel.noiseStart.disabled = false;
   cel.mapAlert.hidden = true;
   cel.verifyProgress.hidden = true;
+  cel.verifyLive.hidden = true;
   cel.verifyResults.hidden = true;
   cel.verifyStart.disabled = false;
   calibPressBuffer.length = 0;
@@ -3276,15 +3323,10 @@ function calibSetAdvance(mode) {
 }
 
 function calibStartPress() {
+  // Every zone, mapped or not: an unmapped zone is exactly the case where the
+  // step-2 mapping watch is needed (press its physical pad, get the Remap).
   calib.pressOrder = [];
-  for (let z = 0; z < N_Z; z += 1) {
-    if (zoneToElectrode[z] >= 0) calib.pressOrder.push(z);
-  }
-  if (!calib.pressOrder.length) {
-    notify('No mapped zones to measure - map zones first', 'warn');
-    calibReset();
-    return;
-  }
+  for (let z = 0; z < N_Z; z += 1) calib.pressOrder.push(z);
   calib.phase = 'press';
   calib.pressState.fill('pending');
   calib.pressPeak.fill(null);
@@ -3306,6 +3348,14 @@ function calibBuildZoneStrip() {
     cel.zoneStrip.appendChild(chip);
     calib.pressChips.push(chip);
   });
+}
+
+// Highlight the targeted zone on the step-2 playfield copy. Event-driven (set
+// on every zone change), so it persists across frames and through the quick-tap
+// sub-phase, which keeps the same zone.
+function calibPaintDiscTarget() {
+  const targetName = calib.pressZone >= 0 ? zones[calib.pressZone] : null;
+  calibPressPads.forEach((pad, zone) => pad.classList.toggle('target', zone === targetName));
 }
 
 // Reflect each zone's status; the targeted zone is always shown as current.
@@ -3343,11 +3393,15 @@ function calibGoTo(pos) {
   calibClearMapAlert();
   cel.pressZone.textContent = zones[calib.pressZone];
   cel.pressProgress.textContent = `Zone ${pos + 1} of ${calib.pressOrder.length}`;
-  cel.pressInstr.textContent =
-    `Press and release ${zones[calib.pressZone]} firmly, at your own pace.`;
+  cel.pressInstr.textContent = zoneToElectrode[calib.pressZone] < 0
+    ? `${zones[calib.pressZone]} has no electrode assigned: press its physical pad, then use Remap in the alert below.`
+    : `Press and release ${zones[calib.pressZone]} firmly, at your own pace.`;
   cel.pressPrev.disabled = pos === 0;
   calibRenderZoneStrip();
-  calibSpeak(calibZoneSpeech(zones[calib.pressZone]));
+  calibPaintDiscTarget();
+  // Announce the zone and the phase it opens on (firm presses); the quick-taps
+  // sub-phase announces itself when it starts.
+  calibSpeak(`${calibZoneSpeech(zones[calib.pressZone])}, long press`);
 }
 
 const calibMedian = (arr) => {
@@ -3407,6 +3461,10 @@ function calibPressLevel(z) {
 function calibPressFrame(data) {
   const z = calib.pressZone;
   const e = zoneToElectrode[z];
+  // The mapping watch runs even when the targeted zone has no electrode yet:
+  // pressing its physical pad lights up whichever electrode it is wired to,
+  // and the alert offers the remap.
+  calibCheckMapping(data, z);
   if (e < 0) return;
   const delta = data.deltas[e];
 
@@ -3435,7 +3493,6 @@ function calibPressFrame(data) {
         setHoldProgress(cel.pressBar, calib.pressCount / CALIB_PRESS_TARGET);
         if (calib.advanceMode === 'auto' && calib.pressCount >= CALIB_PRESS_TARGET) {
           calibEnterQuick();
-          calibCheckMapping(data, z);
           return;
         }
       }
@@ -3463,12 +3520,11 @@ function calibPressFrame(data) {
       }
     }
   }
-
-  calibCheckMapping(data, z);
 }
 
 // Passive mapping check: if a pad other than the targeted one answers strongest
-// (above the level), flag it with a one-click remap. Non-blocking.
+// (above the level), flag it with a one-click remap. Non-blocking. Unmapped
+// electrodes are scanned too: they are the prime remap candidates.
 function calibCheckMapping(data, z) {
   if (!config) return;
   const level = calibPressLevel(z);
@@ -3476,7 +3532,6 @@ function calibCheckMapping(data, z) {
   let strongE = -1;
   let strongD = 0;
   for (let e = 0; e < N_E; e += 1) {
-    if (config.map[e] === UNMAPPED) continue;
     const d = data.deltas[e];
     if (d > strongD) { strongD = d; strongE = e; }
   }
@@ -3494,8 +3549,12 @@ function calibCheckMapping(data, z) {
 function calibShowMapAlert(e) {
   if (calib.mapAlertE === e) return;
   calib.mapAlertE = e;
-  const zoneName = config.map[e] === UNMAPPED ? `E${e}` : zones[config.map[e]];
-  cel.mapAlertText.textContent = `Response detected on ${zoneName} - check mapping`;
+  // An unmapped electrode is named by its sensor:channel, never `E<n>`, which
+  // would read as one of the E1-E8 zones.
+  const source = config.map[e] === UNMAPPED
+    ? `unassigned electrode ${sensorChannel(e)}`
+    : zones[config.map[e]];
+  cel.mapAlertText.textContent = `Response detected on ${source} - check mapping`;
   cel.mapAlert.hidden = false;
 }
 
@@ -3547,11 +3606,18 @@ function calibFinishPress() {
 
 // --- Step 3: compute + review ----------------------------------------------
 
-// Threshold sits as low as possible just above the noise ceiling. A zone is
-// "risky" if its press barely clears the noise, or if the threshold lands too
-// close to the zone's real fast taps (would risk missing them in play).
-function calibThresholdFor(ceil) {
-  return clampThr(ceil + Math.max(CALIB_MIN_MARGIN, 0.3 * ceil));
+// Threshold placement. The floor is the old "just above the noise" rule
+// (noise + margin). When the zone's fast taps (quickfire) are known and usable,
+// the threshold is raised to the midpoint between noise and taps: between two
+// rapid taps a hovering finger keeps a residual delta above the noise, and the
+// release margin (OFF) must stay above it or the zone never lets go during a
+// spam. The higher of floor and midpoint wins; without a usable quickfire only
+// the floor applies. A zone stays "risky" if its press barely clears the noise
+// or the threshold lands too close to its fast taps.
+function calibThresholdFor(ceil, quick) {
+  const floor = ceil + Math.max(CALIB_MIN_MARGIN, 0.3 * ceil);
+  const mid = quick != null && quick > ceil ? ceil + 0.5 * (quick - ceil) : 0;
+  return clampThr(Math.max(floor, mid));
 }
 
 function calibComputeAll() {
@@ -3564,9 +3630,9 @@ function calibComputeAll() {
       continue;
     }
     const ceil = calib.noiseCeil[z];
-    const thr = calibThresholdFor(ceil);
-    calib.threshold[z] = thr;
     const quick = calib.quickfire[z];
+    const thr = calibThresholdFor(ceil, quick);
+    calib.threshold[z] = thr;
     const closeToQuick = quick != null && thr > CALIB_QUICK_RISKY_FRAC * quick;
     calib.status[z] = (peak - ceil < CALIB_RISKY_GAP || closeToQuick) ? 'risky' : 'ok';
   }
@@ -3574,35 +3640,63 @@ function calibComputeAll() {
 
 const CALIB_STATUS_LABEL = { ok: 'ok', risky: 'risky', kept: 'kept (not measured)' };
 
+// One result cell: the suggested threshold shown large, with the measurements
+// (noise / press / quick) small below. The status ('ok' | 'risky' | 'kept')
+// colours the whole cell; the p95 noise stays as a hover title.
+function calibResultCell(z) {
+  const cell = document.createElement('div');
+  cell.className = `zcell calib-rescell ${calib.status[z]}`;
+  cell.dataset.zone = zones[z];
+  cell.title = `95th percentile noise: ${calib.noiseP95[z]}`;
+
+  const top = document.createElement('div');
+  top.className = 'zcell-top';
+  const name = document.createElement('span');
+  name.className = 'zcell-name';
+  name.textContent = zones[z];
+  const status = document.createElement('span');
+  status.className = 'calib-res-status';
+  // The short word here; the full "kept (not measured)" lives in the legend.
+  status.textContent = CALIB_STATUS_LABEL[calib.status[z]].split(' ')[0];
+  top.append(name, status);
+  cell.appendChild(top);
+
+  const thr = document.createElement('b');
+  thr.className = 'calib-res-thr';
+  thr.textContent = calib.threshold[z];
+  cell.appendChild(thr);
+
+  const peak = calib.pressPeak[z] === null ? '-' : calib.pressPeak[z];
+  const quick = calib.quickfire[z] == null ? '-' : calib.quickfire[z];
+  const meas = document.createElement('div');
+  meas.className = 'calib-res-meas';
+  meas.textContent = `noise ${calib.noiseCeil[z]} / press ${peak} / quick ${quick}`;
+  cell.appendChild(meas);
+
+  return cell;
+}
+
 function calibBuildResults() {
   cel.resultRows.textContent = '';
+  let currentFamily = null;
+  let grid = null;
   for (let z = 0; z < N_Z; z += 1) {
     if (zoneToElectrode[z] < 0) continue;   // unmapped zones are not shown
-    const row = document.createElement('tr');
-    row.classList.add(calib.status[z]);
-
-    const name = document.createElement('td');
-    name.className = 'zone-name';
-    name.textContent = zones[z];
-
-    const noise = document.createElement('td');
-    noise.textContent = calib.noiseCeil[z];
-    noise.title = `95th percentile: ${calib.noiseP95[z]}`;
-
-    const peak = document.createElement('td');
-    peak.textContent = calib.pressPeak[z] === null ? '-' : calib.pressPeak[z];
-
-    const quick = document.createElement('td');
-    quick.textContent = calib.quickfire[z] == null ? '-' : calib.quickfire[z];
-
-    const thr = document.createElement('td');
-    thr.textContent = calib.threshold[z];
-
-    const status = document.createElement('td');
-    status.textContent = CALIB_STATUS_LABEL[calib.status[z]];
-
-    row.append(name, noise, peak, quick, thr, status);
-    cel.resultRows.appendChild(row);
+    const family = zones[z][0];
+    if (family !== currentFamily) {
+      currentFamily = family;
+      const group = document.createElement('div');
+      group.className = 'zgrid-group';
+      const heading = document.createElement('span');
+      heading.className = 'zgrid-fam';
+      heading.textContent = `Group ${family}`;
+      group.appendChild(heading);
+      grid = document.createElement('div');
+      grid.className = 'zgrid';
+      group.appendChild(grid);
+      cel.resultRows.appendChild(group);
+    }
+    grid.appendChild(calibResultCell(z));
   }
 }
 
@@ -3740,6 +3834,12 @@ function calibStartVerify() {
   calib.verifyEndsAt = performance.now() + CALIB_VERIFY_MS;
   cel.verifyResults.hidden = true;
   cel.verifyProgress.hidden = false;
+  // Show the live trace and the triggered-zones list, reset for this pass.
+  cel.verifyLive.hidden = false;
+  cel.verifyLiveEmpty.hidden = false;
+  cel.verifyLiveWrap.hidden = true;
+  cel.verifyLiveRows.textContent = '';
+  calib.verifyLiveDirty = false;
   cel.verifyStart.disabled = true;
   cel.verifyApply.disabled = false;
   setHoldProgress(cel.verifyBar, 0);
@@ -3760,6 +3860,33 @@ function calibVerifyFrame(data) {
   setHoldProgress(cel.verifyBar, 1 - remaining / CALIB_VERIFY_MS);
   cel.verifyCount.textContent = `${Math.ceil(remaining / 1000)} s left - do not touch the panel`;
   if (now >= calib.verifyEndsAt) calibFinishVerify();
+}
+
+// Live list of zones that fired since the start of the current pass, newest data
+// folded in by drainTriggerEvents. Only repaints on a change (dirty flag); the
+// dispatch already gates it on the calibration section being visible.
+function calibRenderVerifyLive() {
+  if (!calib.verifyLiveDirty) return;
+  calib.verifyLiveDirty = false;
+  const fired = [];
+  for (let z = 0; z < N_Z; z += 1) {
+    if (calib.verifyTrig[z] > 0) fired.push(z);
+  }
+  cel.verifyLiveEmpty.hidden = fired.length > 0;
+  cel.verifyLiveWrap.hidden = fired.length === 0;
+  cel.verifyLiveRows.textContent = '';
+  fired.forEach((z) => {
+    const row = document.createElement('tr');
+    const cells = [zones[z], calib.threshold[z], calib.noiseCeil[z],
+      calib.verifyTrig[z], calib.verifyPeak[z]];
+    cells.forEach((text, i) => {
+      const td = document.createElement('td');
+      if (i === 0) td.className = 'zone-name';
+      td.textContent = text;
+      row.appendChild(td);
+    });
+    cel.verifyLiveRows.appendChild(row);
+  });
 }
 
 // Add a "may miss fast taps" caveat when a raised threshold lands too close to
@@ -3794,7 +3921,7 @@ function calibComputeVerify() {
     // Headroom: the real resting noise sits well below the threshold.
     const peak = calib.pressPeak[z];
     if (peak === null) continue;
-    const ideal = calibThresholdFor(ceil);
+    const ideal = calibThresholdFor(ceil, calib.quickfire[z]);
     if (ideal <= cand - VERIFY_LOWER_MIN_GAP) {
       const warn = calibVerifyWarn(z, ideal);
       let reason = `noise only ${ceil}, room below ${cand}`;
@@ -3808,6 +3935,7 @@ function calibComputeVerify() {
 function calibFinishVerify() {
   calib.phase = 'results';   // measurement done; stay on step 4 showing results
   cel.verifyProgress.hidden = true;
+  cel.verifyLive.hidden = true;   // a re-verify pass re-shows it via calibStartVerify
   cel.verifyStart.disabled = false;
   calib.verifyAdjust = calibComputeVerify();
   const raises = calib.verifyAdjust.filter((a) => a.dir === 'raise');
@@ -3919,15 +4047,29 @@ function calibCreateProfile() {
   // restore point so leaving the wizard does not undo them.
   calib.tuneSaved = null;
 
-  if (cel.applyNow.checked) applyProfile(profile);
+  if (cel.applyNow.checked) {
+    applyProfile(profile);
+    // The wizard's outcome went through the standby verify: applying it without
+    // persisting would lose it on the next power cycle. Save right away.
+    send('save');
+    notify(`Profile "${name}" applied and saved to flash`);
+  }
 }
 
 // Called every frame from render(): advance whichever measurement is running.
 // A dropped link mid-measurement stops the wizard rather than freezing it.
 function calibFrame(data) {
+  // Step 1 pushes probe settings (avg/debounce) live onto the board. If the link
+  // then drops, those stay on the board while the wizard resets - so stash the
+  // originals and re-apply them once the board is back.
+  if (calib.restorePending && calib.phase === 'idle' && data.connected && config) {
+    calib.tuneSaved = calib.restorePending;
+    calib.restorePending = null;
+    calibRestoreGlobals();
+  }
   if (calib.phase !== 'noise' && calib.phase !== 'press' && calib.phase !== 'verify') return;
   if (!data.connected || !config) {
-    calib.tuneSaved = null;   // the board is gone; nothing to restore to
+    if (calib.tuneSaved) calib.restorePending = calib.tuneSaved;
     calibReset();
     notify('Board disconnected - calibration stopped', 'warn');
     return;
@@ -3987,6 +4129,7 @@ function calibInit() {
     calib.reverify.pass = 0;
     cel.verifyResults.hidden = true;
     cel.verifyProgress.hidden = true;
+    cel.verifyLive.hidden = true;
     cel.verifyStart.disabled = false;
     cel.verifyApply.disabled = false;
     setHoldProgress(cel.verifyBar, 0);
@@ -4425,12 +4568,14 @@ function render(data) {
 
       const refs = rowRefs.get(zone);
       if (refs) {
-        const width = `${Math.min(100, (delta / threshold) * 100)}%`;
-        refs.cells.forEach(({ deviation, gauge }) => {
+        const width = `${Math.min(100, (delta / barScale) * 100)}%`;
+        const thrPos = `${Math.min(100, (threshold / barScale) * 100)}%`;
+        refs.cells.forEach(({ deviation, fill, mark }) => {
           deviation.textContent = delta;
           deviation.classList.toggle('over', active);
-          gauge.style.width = width;
-          gauge.classList.toggle('over', active);
+          fill.style.width = width;
+          fill.classList.toggle('over', active);
+          mark.style.setProperty('--thr-pos', thrPos);
         });
       }
     });
@@ -4465,7 +4610,17 @@ function render(data) {
   // noise/auto-tune measurement, the targeted-zone trace during the presses.
   if (activeSection === 'calibration') {
     if (calib.phase === 'noise') drawGlobalSpark(cel.traceAll);
-    else if (calib.phase === 'press') drawCalibPressTrace();
+    else if (calib.phase === 'press') {
+      drawCalibPressTrace();
+      // Keep the disc's live "touched" state like the Live view, so a press is
+      // seen landing on the targeted pad.
+      zones.forEach((zone, z) => {
+        calibPressPads.get(zone)?.classList.toggle('touched', data.zonesActive[z]);
+      });
+    } else if (calib.phase === 'verify') {
+      drawGlobalSpark(cel.verifyTraceAll);
+      calibRenderVerifyLive();
+    }
   }
 
   // Live calibration observes real play whenever it is running.
@@ -4586,6 +4741,13 @@ els.dialog.addEventListener('close', () => { learning = null; });
 
 // --- Tuning forms and sliders ----------------------------------------------
 
+// Reset-to-defaults sits in the Signal-processing header (same command and
+// notice the old Presets card used).
+document.getElementById('proc-reset-defaults').addEventListener('click', () => {
+  send('preset default');
+  notify('Default preset applied - use Save to flash to keep it', 'warn');
+});
+
 // A slider under the pointer must not change value while the page is scrolled.
 document.querySelectorAll('input[type="range"]').forEach((slider) => {
   slider.addEventListener('wheel', (event) => event.preventDefault(), { passive: false });
@@ -4666,6 +4828,8 @@ function start() {
   zones = zoneNames();
   activeSection = document.querySelector('.nav button.active')?.dataset.section || 'info';
   buildGlobalLegend();
+  buildGlobalLegend(document.getElementById('calib-trace-all-legend'));
+  buildGlobalLegend(document.getElementById('calib-verify-trace-legend'));
   buildLogTable();
   renderLastTriggers();
   updateRecordStatus();
@@ -4682,6 +4846,11 @@ function start() {
   });
   buildDisc(els.thrDisc, thrPads, openThresholdDialog);
   buildDisc(els.mapDisc, mapPads, selectZoneForMapping);
+  // Step-2 playfield copy: clicking a pad jumps to that zone, like its chip.
+  buildDisc(cel.pressDisc, calibPressPads, (zone) => {
+    const pos = calib.pressOrder.indexOf(zones.indexOf(zone));
+    if (pos >= 0) calibJumpTo(pos);
+  });
 
   transport = createTransport(state, () => render(state));
 
