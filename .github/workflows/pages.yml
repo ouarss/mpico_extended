@@ -21,6 +21,7 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  deployments: write
 
 # Never run two deployments at once, but let a running one finish.
 concurrency:
@@ -41,3 +42,23 @@ jobs:
           path: monitor
       - id: deployment
         uses: actions/deploy-pages@v4
+      # Only the live deployment is worth keeping: the older entries pile up in
+      # the Deployments panel without adding anything, so each deploy prunes
+      # everything but itself.
+      - name: Prune old deployments
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const { data: deployments } = await github.rest.repos.listDeployments({
+              owner, repo, environment: 'github-pages', per_page: 100,
+            });
+            // Newest first; keep [0], the deployment this run just created.
+            for (const d of deployments.slice(1)) {
+              await github.rest.repos.createDeploymentStatus({
+                owner, repo, deployment_id: d.id, state: 'inactive',
+              });
+              await github.rest.repos.deleteDeployment({
+                owner, repo, deployment_id: d.id,
+              });
+            }
