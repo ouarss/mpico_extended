@@ -141,20 +141,22 @@
         <article data-topic="start" class="active">
           <h2>Start here</h2>
           <p><strong>First time? Four steps:</strong></p>
+          <p>
+            <a class="dl-btn" href="https://github.com/ouarss/mpico_extended/releases"
+              target="_blank" rel="noopener">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              Get the firmware (UF2)</a>
+            <a class="gh-btn" href="https://github.com/ouarss/mpico_extended"
+              target="_blank" rel="noopener" title="Source code of this version">
+              <svg class="gh-ico"><use href="#gh-mark"></use></svg>
+              Source code, GPL-3.0</a>
+          </p>
           <ol class="info-steps">
-            <li><strong>Flash the firmware</strong>:
-              <a class="dl-btn" href="https://github.com/ouarss/mpico_extended/releases"
-                target="_blank" rel="noopener">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-                Get the firmware (UF2)</a>
-              <a class="gh-btn" href="https://github.com/ouarss/mpico_extended"
-                target="_blank" rel="noopener" title="Source code of this version">
-                <svg class="gh-ico"><use href="#gh-mark"></use></svg>
-                Source code, GPL-3.0</a>
-              then hold the BOOTSEL button while plugging the Pico (or use
-              Console: Reset Bootloader on a board already running it), and
-              drop the file on the RPI-RP2 drive that appears. The board reboots
-              by itself. Already running the firmware? Skip this.</li>
+            <li><strong>Flash the firmware</strong>: hold the BOOTSEL button
+              while plugging the Pico (or use Console: Reset Bootloader on a
+              board already running it), and drop the file downloaded above on
+              the RPI-RP2 drive that appears. The board reboots by itself.
+              Already running the firmware? Skip this.</li>
             <li><strong>Connect</strong>: Chrome or Edge, click Connect (bottom
               left), pick the CLI port.</li>
             <li><strong>Auto-calibration</strong>: open that tab and follow the
