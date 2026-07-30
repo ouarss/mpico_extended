@@ -3443,7 +3443,9 @@ function calibEnterQuick() {
   calib.quickInTap = false;
   calib.quickTapPeak = 0;
   cel.pressInstr.textContent =
-    `Now tap ${zones[calib.pressZone]} briefly ${CALIB_QUICK_TARGET} times (about once per second).`;
+    `Now tap ${zones[calib.pressZone]} briefly ${CALIB_QUICK_TARGET} times (about once per second). `
+    + 'Quick taps mirror real play: a brief press leaves a weaker signal, '
+    + 'and that is what this refines.';
   cel.pressCount.textContent = `0 / ${CALIB_QUICK_TARGET} taps`;
   setHoldProgress(cel.pressBar, 0);
   calibSpeak('quick taps');
