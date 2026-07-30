@@ -142,7 +142,6 @@ body {
 @media (max-width: 1100px) {
   .split { grid-template-columns: 1fr; }
   body { grid-template-columns: 1fr; }
-  .sidebar { position: static; height: auto; }
 }
 
 .panel {

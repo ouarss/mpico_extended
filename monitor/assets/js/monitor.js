@@ -4661,14 +4661,37 @@ function syncSidebarToggle(collapsed) {
   sidebarToggle.title = label;
 }
 syncSidebarToggle(document.body.classList.contains('sidebar-collapsed'));
+
+// Below the stacking breakpoint the same toggle drives the floating drawer
+// instead of the desktop rail. The drawer state is deliberately not persisted:
+// an overlay reopening on its own would be a nuisance, not a preference.
+const drawerMq = window.matchMedia('(max-width: 1100px)');
+function closeDrawer() { document.body.classList.remove('menu-open'); }
+
 sidebarToggle.addEventListener('click', () => {
+  if (drawerMq.matches) {
+    document.body.classList.toggle('menu-open');
+    return;
+  }
   const collapsed = document.body.classList.toggle('sidebar-collapsed');
   storageSet(SIDEBAR_COLLAPSED_KEY, collapsed ? '1' : '0');
   syncSidebarToggle(collapsed);
 });
 
+// Picking a section, clicking past the drawer, pressing Escape, or resizing
+// across the breakpoint all close it.
+document.addEventListener('click', (e) => {
+  if (!document.body.classList.contains('menu-open')) return;
+  if (!e.target.closest('.sidebar')) closeDrawer();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeDrawer();
+});
+drawerMq.addEventListener('change', closeDrawer);
+
 document.querySelectorAll('.nav button').forEach((button) => {
   button.addEventListener('click', () => {
+    closeDrawer();
     document.querySelectorAll('.nav button').forEach((b) => b.classList.remove('active'));
     button.classList.add('active');
     document.querySelectorAll('.section').forEach((section) => {
