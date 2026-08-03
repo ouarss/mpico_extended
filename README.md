@@ -225,19 +225,19 @@ Same rule as the rest: **non-commercial**. Build one for yourself, don't sell
 it.
 
 ![The panel mid-build: the ITO sheet, its taped zones and the flat cables
-running out to the rim](custom-build/Build%20pictures/full-panel-overview.jpg)
+running out to the rim](custom-build/build-pictures/full-panel-overview.jpg)
 
 *The panel this firmware was written against: a full-size ITO playfield, every
 zone tapped at the rim, every tap running back to a single connector.*
 
-### `Build pictures/` — what it looks like assembled
+### `build-pictures/` — what it looks like assembled
 
 | At the rim | Under the panel |
 |---|---|
-| ![The panel board at the rim, two flat cables in and one ribbon out](custom-build/Build%20pictures/one-connector-to-rules-them-all.jpg) | ![The other end of the ribbon, on the Pico board under the panel](custom-build/Build%20pictures/mai_pico-panel-connexion.jpg) |
-| *`one-connector-to-rules-them-all.jpg`: every zone tap arrives on one small board, two flat cables in, a single ribbon out.* | *`mai_pico-panel-connexion.jpg`: the other end of that ribbon, on the Pico board, with the three sensor modules above it.* |
+| ![The panel board at the rim, two flat cables in and one ribbon out](custom-build/build-pictures/one-connector-to-rules-them-all.jpg) | ![The other end of the ribbon, on the Pico board under the panel](custom-build/build-pictures/mai_pico-panel-connection.jpg) |
+| *`one-connector-to-rules-them-all.jpg`: every zone tap arrives on one small board, two flat cables in, a single ribbon out.* | *`mai_pico-panel-connection.jpg`: the other end of that ribbon, on the Pico board, with the three sensor modules above it.* |
 
-### `Fullbody Shield/` — the metal front panel
+### `fullbody-shield/` — the metal front panel
 
 The full-body front panel, vectorised and ready to cut, as `.ai` and `.dxf`
 with a `.png` preview. It carries the screen opening, the playfield circle and
@@ -246,15 +246,21 @@ every button and LED hole.
 Folding, per its `readme.txt`: 40 mm flange, 75° on top, 90° on both sides. It
 started from my Wacca panel, so the outer profile is specific to that cabinet.
 
+> [!WARNING]
+> **The playfield opening is not standard.** It was drawn for an oversized
+> glass, somewhere around 620 mm across, where the usual one is about 600 mm.
+> Measure your own glass against the `.dxf` before anyone cuts metal: the hole
+> is the one thing here you cannot make smaller afterwards.
+
 | Flat, as cut | Folded |
 |---|---|
-| ![The vectorised panel: screen opening, playfield circle, button and LED holes](custom-build/Fullbody%20Shield/mai-shield-v3.png) | ![The same panel drawn folded, with the angle of each edge](custom-build/Fullbody%20Shield/fold%20reference.jpg) |
-| *`mai-shield-v3.png`, the preview of the `.dxf`: screen opening, playfield circle, and every button and LED hole.* | *`fold reference.jpg`: which edge folds where, and at what angle.* |
+| ![The vectorised panel: screen opening, playfield circle, button and LED holes](custom-build/fullbody-shield/mai-shield-v3.png) | ![The same panel drawn folded, with the angle of each edge](custom-build/fullbody-shield/fold-reference.jpg) |
+| *`mai-shield-v3.png`, the preview of the `.dxf`: screen opening, playfield circle, and every button and LED hole.* | *`fold-reference.jpg`: which edge folds where, and at what angle.* |
 
-### `Pattern templates/` — cutting the ITO zones
+### `pattern-templates/` — cutting the ITO zones
 
 ![The electrode layout: every zone and the trace that leaves it for the
-rim](custom-build/Pattern%20templates/pattern.jpg)
+rim](custom-build/pattern-templates/pattern.jpg)
 
 *`pattern.jpg`, the layout in one view: every zone, and the trace that carries
 it out to the rim where the flat cables pick it up.*
@@ -263,34 +269,37 @@ Two ways to transfer it onto the film:
 
 | Folder | What it is | Print with |
 |---|---|---|
-| `Circle template/` | Six A4 sheets forming the complete circle | fit image to frame **on** |
-| `Cut templates/` | The same zones laid out flat over two sheets | fit to frame **off** |
+| `circle-template/` | Six A4 sheets (`sheet-1` … `sheet-6`) forming the complete circle | fit image to frame **on** |
+| `cut-templates/` | The same zones laid out flat over two sheets | fit to frame **off** |
 
 Those settings are not interchangeable, and the scale the printer applies is the
 only thing that matters here, so each folder carries the screenshot of its own:
 
-| `Circle template/checked.png` | `Cut templates/no-check.png` |
+| `print-fit-to-frame-on.png` | `print-fit-to-frame-off.png` |
 |---|---|
-| ![The print dialog with fit image to frame ticked](custom-build/Pattern%20templates/Circle%20template/checked.png) | ![The print dialog with fit image to frame unticked](custom-build/Pattern%20templates/Cut%20templates/no-check.png) |
-| *Ticked, for the six circle sheets.* | *Unticked, for the two pattern sheets.* |
+| ![The print dialog with fit image to frame ticked](custom-build/pattern-templates/circle-template/print-fit-to-frame-on.png) | ![The print dialog with fit image to frame unticked](custom-build/pattern-templates/cut-templates/print-fit-to-frame-off.png) |
+| *Ticked, for the six circle sheets.* | *Unticked, for the two cut sheets.* |
 
-### `PCBs/` — three boards
+The sheets are 300 DPI A4 and are meant to come out at exactly that: printed
+any other way, the pattern no longer matches the panel.
+
+### `pcbs/` — three boards
 
 | Board | What it does |
 |---|---|
 | `glass-pcb` | The small board at the panel rim: the flat cables coming off the ITO film land there and leave as that one ribbon |
-| `837-15257-01_IO4-extension` | A breakout for the Sega IO4 (`837-15257-01`): its 60-pin and 20-pin IDC in, JST out for test/service/coin, 1P/2P buttons and select, card-reader and camera LEDs, the 12 V billboard RGB, plus 5 V/12 V distribution |
+| `837-15257-01-io4-extension` | A breakout for the Sega IO4 (`837-15257-01`): its 60-pin and 20-pin IDC in, JST out for test/service/coin, 1P/2P buttons and select, card-reader and camera LEDs, the 12 V billboard RGB, plus 5 V/12 V distribution |
 | `mai_pico-custom-output` | mai_pico v1.1 with the panel output reworked into a single ribbon header, next to the Pico, the eight button connectors and the three sensor modules |
 
 | `glass-pcb` | `mai_pico-custom-output` |
 |---|---|
-| ![The panel-rim board: one ribbon header, two flat-cable headers](custom-build/PCBs/glass-pcb-preview.png) | ![The mai_pico board: Pico footprint, eight button connectors, three sensor modules, one ribbon header](custom-build/PCBs/mai_pico-custom-output-preview.png) |
+| ![The panel-rim board: one ribbon header, two flat-cable headers](custom-build/pcbs/glass-pcb-preview.png) | ![The mai_pico board: Pico footprint, eight button connectors, three sensor modules, one ribbon header](custom-build/pcbs/mai_pico-custom-output-preview.png) |
 | *What the photo above shows in the flesh.* | *The output section is the ribbon header at the bottom.* |
 
 ![The IO4 extension: two IDC inputs on top, JST outputs for buttons, LEDs and
-power](custom-build/PCBs/837-15257-01_IO4-extension-preview.png)
+power](custom-build/pcbs/837-15257-01-io4-extension-preview.png)
 
-*`837-15257-01_IO4-extension`: the IO4's two IDC connectors in, everything a
+*`837-15257-01-io4-extension`: the IO4's two IDC connectors in, everything a
 cabinet actually needs to plug into out.*
 
 The first two ship as a preview `.png` and a `.zip` of Gerbers, ready to upload
@@ -301,10 +310,10 @@ the output reworked, so the design is whowechina's and so is the right to hand
 out a production-ready file for it. The picture shows what changed; the board
 itself is theirs, and that is where to get it.
 
-### `Plan/` — the cabinet
+### `plan/` — the cabinet
 
 ![The cabinet plan: cut list, front view and side profile with its
-angles](custom-build/Plan/mai-plan.png)
+angles](custom-build/plan/mai-plan.png)
 
 `mai-plan.png`, drawn rough and kept that way: a cut list of every panel with
 its thickness, a front view and a side profile with its angles. Enough to walk
