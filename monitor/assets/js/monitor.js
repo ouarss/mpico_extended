@@ -4655,37 +4655,53 @@ function render(data) {
 // --- Navigation ------------------------------------------------------------
 
 const sidebarToggle = document.getElementById('sidebar-toggle');
-function syncSidebarToggle(collapsed) {
-  const label = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
-  sidebarToggle.setAttribute('aria-label', label);
-  sidebarToggle.title = label;
-}
-syncSidebarToggle(document.body.classList.contains('sidebar-collapsed'));
 
 // Below the stacking breakpoint the same toggle drives the floating drawer
 // instead of the desktop rail. The drawer state is deliberately not persisted:
 // an overlay reopening on its own would be a nuisance, not a preference.
 const drawerMq = window.matchMedia('(max-width: 1100px)');
-function closeDrawer() { document.body.classList.remove('menu-open'); }
+
+// One button, two jobs, so the label follows whichever one is in play.
+function syncSidebarToggle() {
+  const open = document.body.classList.contains('menu-open');
+  const label = drawerMq.matches
+    ? (open ? 'Close menu' : 'Open menu')
+    : (document.body.classList.contains('sidebar-collapsed') ? 'Expand sidebar' : 'Collapse sidebar');
+  sidebarToggle.setAttribute('aria-label', label);
+  sidebarToggle.setAttribute('aria-expanded', drawerMq.matches && open ? 'true' : 'false');
+  sidebarToggle.title = label;
+}
+syncSidebarToggle();
+
+function closeDrawer() {
+  document.body.classList.remove('menu-open');
+  syncSidebarToggle();
+}
 
 sidebarToggle.addEventListener('click', () => {
   if (drawerMq.matches) {
     document.body.classList.toggle('menu-open');
+    syncSidebarToggle();
     return;
   }
   const collapsed = document.body.classList.toggle('sidebar-collapsed');
   storageSet(SIDEBAR_COLLAPSED_KEY, collapsed ? '1' : '0');
-  syncSidebarToggle(collapsed);
+  syncSidebarToggle();
 });
 
 // Picking a section, clicking past the drawer, pressing Escape, or resizing
 // across the breakpoint all close it.
 document.addEventListener('click', (e) => {
+  if (infoNavWrap.classList.contains('open') && !e.target.closest('.info-nav-wrap')) {
+    setInfoNavOpen(false);
+  }
   if (!document.body.classList.contains('menu-open')) return;
   if (!e.target.closest('.sidebar')) closeDrawer();
 });
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') closeDrawer();
+  if (e.key !== 'Escape') return;
+  closeDrawer();
+  setInfoNavOpen(false);
 });
 drawerMq.addEventListener('change', closeDrawer);
 
@@ -4715,6 +4731,21 @@ document.querySelectorAll('.nav button').forEach((button) => {
   });
 });
 
+// Information topics: a column on wide screens, a dropdown below 760px. The
+// same buttons drive both, the collapsed form just needs opening and closing.
+const infoNavWrap = document.querySelector('.info-nav-wrap');
+const infoNavToggle = document.getElementById('info-nav-toggle');
+const infoNavCurrent = document.getElementById('info-nav-current');
+
+function setInfoNavOpen(open) {
+  infoNavWrap.classList.toggle('open', open);
+  infoNavToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+infoNavToggle.addEventListener('click', () => {
+  setInfoNavOpen(!infoNavWrap.classList.contains('open'));
+});
+
 document.querySelectorAll('.info-nav button').forEach((button) => {
   button.addEventListener('click', () => {
     document.querySelectorAll('.info-nav button').forEach((b) => b.classList.remove('active'));
@@ -4722,6 +4753,13 @@ document.querySelectorAll('.info-nav button').forEach((button) => {
     document.querySelectorAll('.info-content article').forEach((article) => {
       article.classList.toggle('active', article.dataset.topic === button.dataset.topic);
     });
+    infoNavCurrent.textContent = button.textContent.trim();
+    // Picking a topic from the dropdown lands on the article, not on whatever
+    // scroll position the previous one was left at.
+    if (infoNavWrap.classList.contains('open')) {
+      setInfoNavOpen(false);
+      infoNavWrap.scrollIntoView({ block: 'start' });
+    }
   });
 });
 

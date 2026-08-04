@@ -24,10 +24,24 @@
   <div class="sidebar-top">
     <div class="brand">MPico Extended<span>Touch monitor</span></div>
     <button type="button" id="sidebar-toggle" class="sidebar-toggle"
-            aria-label="Collapse sidebar" title="Collapse sidebar">
+            aria-label="Collapse sidebar" title="Collapse sidebar" aria-expanded="false">
       <svg class="sidebar-toggle-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor"
            stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <polyline points="15 6 9 12 15 18"></polyline>
+      </svg>
+      <!-- Below the stacking breakpoint the same button is a plain burger, then
+           a close cross while the drawer is open: a chevron reads as "collapse",
+           not as "menu". -->
+      <svg class="sidebar-burger-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round" aria-hidden="true">
+        <line x1="4" y1="7" x2="20" y2="7"></line>
+        <line x1="4" y1="12" x2="20" y2="12"></line>
+        <line x1="4" y1="17" x2="20" y2="17"></line>
+      </svg>
+      <svg class="sidebar-close-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round" aria-hidden="true">
+        <line x1="6" y1="6" x2="18" y2="18"></line>
+        <line x1="18" y1="6" x2="6" y2="18"></line>
       </svg>
     </button>
   </div>
@@ -119,23 +133,37 @@
     <header class="section-head">
       <h1>Information</h1>
       <p class="hint">How the board decides a zone is pressed, and how to set it
-        so nothing triggers on its own. Pick a topic on the left.</p>
+        so nothing triggers on its own. Pick a topic from the list.</p>
     </header>
 
     <div class="info-layout">
-      <nav class="info-nav">
-        <button type="button" data-topic="start" class="active">Start here</button>
-        <button type="button" data-topic="hardware">Hardware</button>
-        <button type="button" data-topic="detection">How detection works</button>
-        <button type="button" data-topic="compare">Old vs new</button>
-        <button type="button" data-topic="guide">Avoiding false triggers</button>
-        <button type="button" data-topic="autocal">Auto Calibration</button>
-        <button type="button" data-topic="livecal">Live Calibration</button>
-        <button type="button" data-topic="logs">Logs</button>
-        <button type="button" data-topic="profiles">Profiles &amp; saving</button>
-        <button type="button" data-topic="connection">Connection</button>
-        <button type="button" data-topic="protocol">Protocol</button>
-      </nav>
+      <!-- The topic list is a column on wide screens; on a phone the same list
+           would be a wall of buttons above every article, so it collapses into
+           one dropdown showing the topic being read. -->
+      <div class="info-nav-wrap">
+        <button type="button" id="info-nav-toggle" class="info-nav-toggle"
+                aria-expanded="false" aria-controls="info-nav">
+          <span class="info-nav-label">Topic</span>
+          <span id="info-nav-current" class="info-nav-current">Start here</span>
+          <svg class="info-nav-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </button>
+        <nav class="info-nav" id="info-nav">
+          <button type="button" data-topic="start" class="active">Start here</button>
+          <button type="button" data-topic="hardware">Hardware</button>
+          <button type="button" data-topic="detection">How detection works</button>
+          <button type="button" data-topic="compare">Old vs new</button>
+          <button type="button" data-topic="guide">Avoiding false triggers</button>
+          <button type="button" data-topic="autocal">Auto Calibration</button>
+          <button type="button" data-topic="livecal">Live Calibration</button>
+          <button type="button" data-topic="logs">Logs</button>
+          <button type="button" data-topic="profiles">Profiles &amp; saving</button>
+          <button type="button" data-topic="connection">Connection</button>
+          <button type="button" data-topic="protocol">Protocol</button>
+        </nav>
+      </div>
 
       <div class="info-content">
         <article data-topic="start" class="active">
@@ -1080,12 +1108,14 @@ noise       7  #                        -&gt; ignored, too small and too brief</
         floor - the number to set a threshold against); triggers counts
         firmware activations. A row turns red when its noise ceiling reaches the
         threshold - that zone risks phantom presses.</p>
-      <table class="zone-table log-table">
-        <thead>
-          <tr><th>Zone</th><th>Threshold</th><th>Peak</th><th>Noise ceiling</th><th>Triggers</th></tr>
-        </thead>
-        <tbody id="log-rows"></tbody>
-      </table>
+      <div class="table-scroll">
+        <table class="zone-table log-table">
+          <thead>
+            <tr><th>Zone</th><th>Threshold</th><th>Peak</th><th>Noise ceiling</th><th>Triggers</th></tr>
+          </thead>
+          <tbody id="log-rows"></tbody>
+        </table>
+      </div>
     </div>
   </section>
 

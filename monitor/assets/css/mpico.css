@@ -27,6 +27,9 @@
 }
 .sidebar-toggle:hover { color: var(--text); border-color: var(--line); }
 .sidebar-toggle-ico { width: 18px; height: 18px; }
+/* Burger and cross belong to the drawer breakpoint only. */
+.sidebar-burger-ico,
+.sidebar-close-ico { display: none; width: 20px; height: 20px; }
 
 /* Each nav button carries a leading icon; the label sits in a span beside it. */
 .nav button {
@@ -75,8 +78,17 @@
   .sidebar .sidebar-status,
   .sidebar .sidebar-credit { display: none; }
   .sidebar-save { margin: 0; width: auto; }
-  /* Chevron points down when the drawer is closed, up when it is open. */
-  .sidebar-toggle-ico { transform: rotate(-90deg); }
+  /* Burger while closed, cross while open - the chevron stays a desktop affair. */
+  .sidebar-toggle {
+    width: 40px;
+    height: 40px;
+    border-color: var(--line);
+    color: var(--text);
+  }
+  .sidebar-toggle-ico { display: none; }
+  .sidebar-burger-ico { display: block; }
+  body.menu-open .sidebar-burger-ico { display: none; }
+  body.menu-open .sidebar-close-ico { display: block; }
 
   body.menu-open .sidebar {
     position: fixed;
@@ -93,11 +105,12 @@
     box-shadow: 24px 0 60px rgba(0, 0, 0, .45);
   }
   body.menu-open .sidebar .nav { display: flex; }
+  /* Fingers, not a mouse pointer: the rail's 8px rows are too tight to aim at. */
+  body.menu-open .nav button { padding: 11px 12px; }
   body.menu-open .sidebar .sidebar-status { display: block; }
   body.menu-open .sidebar .sidebar-credit { display: block; }
   body.menu-open .sidebar-save { width: 100%; }
   body.menu-open .sidebar-top { flex: none; }
-  body.menu-open .sidebar-toggle-ico { transform: rotate(90deg); }
   /* Dim what the drawer floats over; clicking it closes the menu. */
   body.menu-open::before {
     content: '';
@@ -288,9 +301,11 @@
 
 /* --- Signal-processing controls ----------------------------------------- */
 
+/* min() so the 232px floor gives way on a narrow phone rather than pushing the
+   card past the viewport. */
 #processing {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(232px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(232px, 100%), 1fr));
   gap: 12px;
 }
 .proc {
@@ -495,11 +510,16 @@ h2 .opt-info { margin-left: 6px; vertical-align: middle; }
 /* Same card language as the processing grid; the LED-order card spans it. */
 .board-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(232px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(232px, 100%), 1fr));
   gap: 12px;
 }
 /* Wide enough for the 8 LED chips on one row, but not the full grid width. */
 .board-grid .board-wide { grid-column: span 2; }
+/* Where the grid is down to a single column, spanning two would conjure an
+   implicit second one and drag the panel past the screen. */
+@media (max-width: 760px) {
+  .board-grid .board-wide { grid-column: auto; }
+}
 
 /* Button LED order: draggable pastilles laid out along the LED chain (position
    0 on the left to 7 on the right). Dragging one reorders which button a chain

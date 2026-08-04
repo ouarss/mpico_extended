@@ -141,7 +141,13 @@ body {
 }
 @media (max-width: 1100px) {
   .split { grid-template-columns: 1fr; }
-  body { grid-template-columns: 1fr; }
+  /* Stacked, the sidebar and the content are two auto rows in a grid kept at
+     100vh - and auto rows share the leftover space. On a short article that
+     inflates the top bar into a banner, so pack the rows at the top instead. */
+  body {
+    grid-template-columns: 1fr;
+    align-content: start;
+  }
 }
 
 .panel {
@@ -279,7 +285,7 @@ button:hover { border-color: var(--accent); }
 
 /* --- Console ------------------------------------------------------------ */
 
-.console-form { display: flex; gap: 8px; margin-top: 10px; }
+.console-form { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .console-form input { flex: 1; }
 
 #console {
@@ -312,6 +318,12 @@ button:hover { border-color: var(--accent); }
 /* --- Zone picker -------------------------------------------------------- */
 
 .map-split { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+/* Declared after the generic .split collapse, so it never inherited it. On a
+   tablet the two halves still earn their width; on a phone they leave the disc
+   and the zone cards unusable, so it folds there. */
+@media (max-width: 760px) {
+  .map-split { grid-template-columns: 1fr; }
+}
 .disc-large { max-width: 100%; }
 
 .disc .pad.clickable { cursor: pointer; }
@@ -389,15 +401,23 @@ button:hover { border-color: var(--accent); }
   accent-color: var(--accent);
 }
 
+/* Label, slider and readout fold onto a second line rather than dragging the
+   form past the viewport; the slider gives up its width first. */
 .global-thr {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   color: var(--muted);
   font-size: 12px;
   flex: 1;
+  min-width: 0;
 }
-.global-thr input[type="range"] { width: 160px; accent-color: var(--accent); }
+.global-thr input[type="range"] {
+  flex: 1 1 120px;
+  min-width: 0;
+  accent-color: var(--accent);
+}
 .global-thr output {
   color: var(--text);
   font: 12px/1.4 var(--mono);
@@ -599,6 +619,11 @@ button:hover { border-color: var(--accent); }
   align-items: start;
 }
 
+/* Transparent on wide screens: the toggle and the list are the grid items, the
+   wrapper only exists to anchor the dropdown once it collapses. */
+.info-nav-wrap { display: contents; }
+.info-nav-toggle { display: none; }
+
 .info-nav {
   display: flex;
   flex-direction: column;
@@ -623,6 +648,11 @@ button:hover { border-color: var(--accent); }
   border-left-color: var(--accent);
   font-weight: 600;
 }
+
+/* Without this a grid item is at least as wide as its widest unbreakable child,
+   so one ASCII diagram would widen the whole column - and the page with it -
+   instead of scrolling inside its own box. */
+.info-content { min-width: 0; }
 
 .info-content article { display: none; }
 .info-content article.active { display: block; }
@@ -734,9 +764,61 @@ button:hover { border-color: var(--accent); }
 .info-table td { color: var(--text); }
 .info-table code { background: none; padding: 0; }
 
+/* One column, and the eleven topics fold into a dropdown that names the article
+   on screen. Wrapped in a row they read as a wall of unrelated buttons. */
 @media (max-width: 760px) {
-  .info-layout { grid-template-columns: 1fr; }
-  .info-nav { position: static; flex-direction: row; flex-wrap: wrap; }
+  .info-layout {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  /* Enough clearance for the sticky top bar when a pick scrolls back here. */
+  .info-nav-wrap {
+    display: block;
+    position: relative;
+    z-index: 40;
+    scroll-margin-top: 72px;
+  }
+
+  .info-nav-toggle {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 12px;
+    background: var(--panel);
+    text-align: left;
+  }
+  .info-nav-label { color: var(--muted); font-size: 12px; flex: none; }
+  .info-nav-current { flex: 1; min-width: 0; font-weight: 600; }
+  .info-nav-chevron {
+    width: 16px;
+    height: 16px;
+    flex: none;
+    align-self: center;
+    color: var(--muted);
+    transition: transform .15s;
+  }
+  .info-nav-wrap.open .info-nav-chevron { transform: rotate(180deg); }
+
+  /* Floated over the article rather than pushing it down: eleven rows of
+     shifted text on every open would be worse than the wrap it replaces. */
+  .info-nav {
+    display: none;
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    max-height: min(60vh, 420px);
+    overflow-y: auto;
+    padding: 6px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: 0 18px 40px rgba(0, 0, 0, .5);
+  }
+  .info-nav-wrap.open .info-nav { display: flex; }
+  .info-nav button { padding: 10px 12px; }
 }
 
 /* Segmented button rows (Auto/Manual, on/off pairs). */
@@ -751,3 +833,13 @@ ul.hint { padding-left: 18px; margin: 0 0 14px; }
 ul.hint li { margin-bottom: 6px; }
 ul.hint strong { color: var(--text); }
 ul.hint em { color: var(--text); font-style: normal; font-weight: 600; }
+
+/* --- Small screens -------------------------------------------------------- */
+
+/* Desktop gutters cost a tenth of a phone's width for nothing; the panels
+   already carry their own padding. */
+@media (max-width: 760px) {
+  .content { padding: 16px 14px 32px; }
+  .panel { padding: 14px; }
+  .section-actions { gap: 10px 16px; }
+}
